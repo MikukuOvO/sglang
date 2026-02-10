@@ -104,7 +104,27 @@ class GPUWorker:
             timings = RequestTimings(request_id=req.request_id)
             req.timings = timings
 
-            output_batch = self.pipeline.forward(req, self.server_args)
+            req.log(server_args=self.server_args)
+            result = self.pipeline.forward(req, self.server_args)
+
+            if isinstance(result, Req):
+                output_batch = OutputBatch(
+                    output=result.output,
+                    audio=getattr(result, "audio", None),
+                    audio_sample_rate=getattr(result, "audio_sample_rate", None),
+                    timings=result.timings,
+                    trajectory_timesteps=getattr(result, "trajectory_timesteps", None),
+                    trajectory_latents=getattr(result, "trajectory_latents", None),
+                    noise_pred=getattr(result, "noise_pred", None),
+                    trajectory_decoded=getattr(result, "trajectory_decoded", None),
+                    rollout_metadata=getattr(result, "rollout_metadata", None),
+                )
+            else:
+                output_batch = result
+
+            if self.rank == 0 and not req.suppress_logs:
+                self.do_mem_analysis(output_batch)
+
             duration_ms = (time.monotonic() - start_time) * 1000
 
             if output_batch.timings:
