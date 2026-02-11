@@ -55,6 +55,13 @@ def _build_sampling_params_from_request(
     image_path: Optional[str] = None,
     seed: Optional[int] = None,
     generator_device: Optional[str] = None,
+    num_inference_steps: Optional[int] = None,
+    guidance_scale: Optional[float] = None,
+    true_cfg_scale: Optional[float] = None,
+    negative_prompt: Optional[str] = None,
+    enable_teacache: Optional[bool] = None,
+    num_frames: int = 1,
+    rollout: Optional[bool] = None,
 ) -> SamplingParams:
     if size is None:
         width, height = None, None
@@ -77,6 +84,12 @@ def _build_sampling_params_from_request(
         output_file_name=f"{request_id}.{ext}",
         seed=seed,
         generator_device=generator_device,
+        num_inference_steps=num_inference_steps,
+        enable_teacache=enable_teacache,
+        **({"guidance_scale": guidance_scale} if guidance_scale is not None else {}),
+        **({"negative_prompt": negative_prompt} if negative_prompt is not None else {}),
+        **({"true_cfg_scale": true_cfg_scale} if true_cfg_scale is not None else {}),
+        **({"rollout": rollout} if rollout is not None else {}),
     )
     return sampling_params
 
@@ -114,6 +127,12 @@ async def generations(
         background=request.background,
         seed=request.seed,
         generator_device=request.generator_device,
+        num_inference_steps=request.num_inference_steps,
+        guidance_scale=request.guidance_scale,
+        true_cfg_scale=request.true_cfg_scale,
+        negative_prompt=request.negative_prompt,
+        enable_teacache=request.enable_teacache,
+        rollout=request.rollout,
     )
     batch = prepare_request(
         server_args=get_global_server_args(),

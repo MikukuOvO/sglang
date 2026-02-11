@@ -24,7 +24,20 @@ def prepare_request(
     sampling_params: SamplingParams,
 ) -> Req:
     """
-    Settle SamplingParams according to ServerArgs
+    Create a Req object with sampling_params as a parameter.
+    """
+    req = Req(
+        sampling_params=sampling_params,
+        VSA_sparsity=server_args.attention_backend_config.VSA_sparsity,
+    )
+    try:
+        diffusers_kwargs = sampling_params.diffusers_kwargs
+    except AttributeError:
+        diffusers_kwargs = None
+    if diffusers_kwargs:
+        req.extra["diffusers_kwargs"] = diffusers_kwargs
+    if getattr(sampling_params, "rollout", False):
+        req.extra["rollout"] = True
 
     """
     # Create a copy of inference args to avoid modifying the original.
