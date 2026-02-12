@@ -88,6 +88,8 @@ def _build_sampling_params_from_request(
         sampling_kwargs["output_path"] = request.output_path
     if request.rollout is not None:
         sampling_kwargs["rollout"] = request.rollout
+    if request.rollout_sde_type is not None:
+        sampling_kwargs["rollout_sde_type"] = request.rollout_sde_type
     sampling_params = SamplingParams.from_user_sampling_params_args(
         model_path=server_args.model_path,
         request_id=request_id,
@@ -162,6 +164,7 @@ async def create_video(
     num_inference_steps: Optional[int] = Form(None),
     enable_teacache: Optional[bool] = Form(False),
     rollout: Optional[bool] = Form(False),
+    rollout_sde_type: Optional[str] = Form("sde"),
     extra_body: Optional[str] = Form(None),
 ):
     content_type = request.headers.get("content-type", "").lower()
@@ -209,6 +212,7 @@ async def create_video(
             num_inference_steps=num_inference_steps,
             enable_teacache=enable_teacache,
             rollout=rollout,
+            rollout_sde_type=rollout_sde_type,
             **(
                 {"guidance_scale": guidance_scale} if guidance_scale is not None else {}
             ),
