@@ -104,6 +104,17 @@ def _build_sampling_params_from_request(
         output_file_name=request_id,
         seed=request.seed,
         generator_device=request.generator_device,
+        num_inference_steps=request.num_inference_steps,
+        guidance_scale=request.guidance_scale,
+        guidance_scale_2=request.guidance_scale_2,
+        negative_prompt=request.negative_prompt,
+        enable_teacache=request.enable_teacache,
+        rollout=request.rollout,
+        rollout_sde_type=request.rollout_sde_type,
+        rollout_noise_level=request.rollout_noise_level,
+        output_path=request.output_path,
+        output_compression=request.output_compression,
+        output_quality=request.output_quality,
     )
 
     return sampling_params
@@ -165,6 +176,9 @@ async def create_video(
     enable_teacache: Optional[bool] = Form(False),
     rollout: Optional[bool] = Form(False),
     rollout_sde_type: Optional[str] = Form("sde"),
+    rollout_noise_level: Optional[float] = Form(0.7),
+    output_quality: Optional[str] = Form("default"),
+    output_compression: Optional[int] = Form(None),
     extra_body: Optional[str] = Form(None),
 ):
     content_type = request.headers.get("content-type", "").lower()
@@ -213,6 +227,9 @@ async def create_video(
             enable_teacache=enable_teacache,
             rollout=rollout,
             rollout_sde_type=rollout_sde_type,
+            rollout_noise_level=rollout_noise_level,
+            output_compression=output_compression,
+            output_quality=output_quality,
             **(
                 {"guidance_scale": guidance_scale} if guidance_scale is not None else {}
             ),

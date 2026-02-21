@@ -137,6 +137,7 @@ class SamplingParams:
     return_frames: bool = False
     rollout: bool = False
     rollout_sde_type: str = "sde"
+    rollout_noise_level: float = 0.7
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
     # if True, allow user params to override subclass-defined protected fields
@@ -196,7 +197,115 @@ class SamplingParams:
             self.width = 1280
         if self.height is None:
             self.height_not_provided = True
-            self.height = 720
+
+        # Handle output_quality to output_compression conversion
+        if self.output_compression is None and self.output_quality is not None:
+            self.output_compression = self._adjust_output_quality(
+                self.output_quality, self.data_type
+            )
+
+        self._validate()
+
+        # Allow env var to override num_inference_steps (for faster CI testing on AMD)
+        env_steps = os.environ.get("SGLANG_TEST_NUM_INFERENCE_STEPS")
+        if env_steps is not None and self.num_inference_steps is not None:
+            self.num_inference_steps = int(env_steps)
+
+    def _adjust_output_quality(self, output_quality: str, data_type: DataType) -> int:
+        """Convert output_quality string to compression level."""
+        output_quality_mapper = {"maximum": 100, "high": 90, "medium": 55, "low": 35}
+        if output_quality == "default":
+            return 50 if data_type == DataType.VIDEO else 75
+        return output_quality_mapper.get(output_quality)
+
+    def _validate(self):
+        """
+        check if the sampling params is correct by itself
+        """
+        if self.prompt_path and not self.prompt_path.endswith(".txt"):
+            raise ValueError(
+                f"prompt_path must be a txt file, got {self.prompt_path!r}"
+            )
+
+        # These are always required to be sane regardless of pipeline.
+        if (
+            not isinstance(self.num_outputs_per_prompt, int)
+            or self.num_outputs_per_prompt <= 0
+        ):
+            raise ValueError(
+                f"num_outputs_per_prompt must be a positive int, got {self.num_outputs_per_prompt!r}"
+            )
+
+        # Used by seconds() and video writer; fps <= 0 is always invalid.
+        if not isinstance(self.fps, int) or self.fps <= 0:
+            raise ValueError(f"fps must be a positive int, got {self.fps!r}")
+
+        # num_frames is already asserted in __post_init__, but keep a friendly error here too
+        # (e.g., when validation is triggered from other code paths).
+        if not isinstance(self.num_frames, int) or self.num_frames <= 0:
+            raise ValueError(
+                f"num_frames must be a positive int, got {self.num_frames!r}"
+            )
+
+        if self.num_inference_steps is not None:
+            if (
+                not isinstance(self.num_inference_steps, int)
+                or self.num_inference_steps <= 0
+            ):
+                raise ValueError(
+                    f"num_inference_steps must be a positive int, got {self.num_inference_steps!r}"
+                )
+
+        # Numeric hyperparams should not be NaN/Inf and should be within basic ranges.
+        # Note: bool is a subclass of int; reject it explicitly to avoid silent surprises.
+        def _finite_non_negative_float(
+            name: str, value: Any, allow_none: bool = True
+        ) -> None:
+            if value is None and allow_none:
+                return
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{name} must be a number, got {value!r}")
+            if not math.isfinite(float(value)):
+                raise ValueError(f"{name} must be finite, got {value!r}")
+            if float(value) < 0.0:
+                raise ValueError(f"{name} must be non-negative, got {value!r}")
+
+        _finite_non_negative_float(
+            "guidance_scale", self.guidance_scale, allow_none=True
+        )
+        _finite_non_negative_float(
+            "guidance_scale_2", self.guidance_scale_2, allow_none=True
+        )
+        _finite_non_negative_float(
+            "true_cfg_scale", self.true_cfg_scale, allow_none=True
+        )
+        _finite_non_negative_float(
+            "guidance_rescale", self.guidance_rescale, allow_none=False
+        )
+        _finite_non_negative_float(
+            "rollout_noise_level", self.rollout_noise_level, allow_none=False
+        )
+
+        if self.cfg_normalization is None:
+            self.cfg_normalization = 0.0
+        elif isinstance(self.cfg_normalization, bool):
+            self.cfg_normalization = 1.0 if self.cfg_normalization else 0.0
+
+        if self.boundary_ratio is not None:
+            if isinstance(self.boundary_ratio, bool) or not isinstance(
+                self.boundary_ratio, (int, float)
+            ):
+                raise ValueError(
+                    f"boundary_ratio must be a number, got {self.boundary_ratio!r}"
+                )
+            if not math.isfinite(float(self.boundary_ratio)):
+                raise ValueError(
+                    f"boundary_ratio must be finite, got {self.boundary_ratio!r}"
+                )
+            if not (0.0 <= float(self.boundary_ratio) <= 1.0):
+                raise ValueError(
+                    f"boundary_ratio must be within [0, 1], got {self.boundary_ratio!r}"
+                )
 
     def check_sampling_param(self):
         if self.prompt_path and not self.prompt_path.endswith(".txt"):
@@ -520,6 +629,12 @@ class SamplingParams:
             choices=["sde", "cps"],
             default=SamplingParams.rollout_sde_type,
             help="Rollout step objective type used in log-prob computation.",
+        )
+        parser.add_argument(
+            "--rollout-noise-level",
+            type=float,
+            default=SamplingParams.rollout_noise_level,
+            help="Noise level used by rollout SDE/CPS step objective.",
         )
         parser.add_argument(
             "--return-trajectory-decoded",
