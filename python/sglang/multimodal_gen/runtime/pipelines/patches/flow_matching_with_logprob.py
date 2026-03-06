@@ -40,7 +40,9 @@ def sde_step_with_logprob(
 ):
     """One rollout step with log-prob estimate.
 
-    Supports the two variants used by flow_grpo patches: `sde` and `cps`.
+    sde_type:
+        1. "sde": Standard Stochastic Differential Equation transition. 
+        2. "cps": Coupled Particle Sampling. 
     """
     sample_dtype = sample.dtype
     model_output = model_output.float()
