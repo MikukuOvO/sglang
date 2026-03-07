@@ -1,6 +1,6 @@
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
-from sglang.multimodal_gen.runtime.post_training.models import RLSchedulerMixin
+from sglang.multimodal_gen.runtime.post_training.models import SchedulerRLMixin
 from sglang.multimodal_gen.runtime.distributed import (
     get_sp_world_size,
     get_local_torch_device,
@@ -13,7 +13,7 @@ from sglang.multimodal_gen.runtime.distributed.communication_op import (
 class DenoisingRLMixin:
     def _maybe_prepare_rollout(self, batch: Req):
         """Prepare denoising loop for rollout"""
-        if not isinstance(self.scheduler, RLSchedulerMixin):
+        if not isinstance(self.scheduler, SchedulerRLMixin):
             if batch.rollout:
                 raise ValueError(
                     f"Scheduler {type(self.scheduler)} does not support rollout"
@@ -30,7 +30,7 @@ class DenoisingRLMixin:
     
     def _maybe_get_rollout_log_probs(self, batch: Req):
         """Get log probs from rollout and add to server args for reward calculation"""
-        if not isinstance(self.scheduler, RLSchedulerMixin):
+        if not isinstance(self.scheduler, SchedulerRLMixin):
              if batch.rollout:
                 raise ValueError(
                     f"Scheduler {type(self.scheduler)} does not support rollout"

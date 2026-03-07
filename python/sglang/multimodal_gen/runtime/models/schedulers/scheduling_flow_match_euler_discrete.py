@@ -33,7 +33,7 @@ from diffusers.utils import BaseOutput
 
 from sglang.multimodal_gen.runtime.models.schedulers.base import BaseScheduler
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
-from sglang.multimodal_gen.runtime.post_training.models import RLSchedulerMixin
+from sglang.multimodal_gen.runtime.post_training.models import SchedulerRLMixin
 
 logger = init_logger(__name__)
 
@@ -52,7 +52,7 @@ class FlowMatchEulerDiscreteSchedulerOutput(BaseOutput):
     prev_sample: torch.FloatTensor
 
 
-class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler, RLSchedulerMixin):
+class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler, SchedulerRLMixin):
     """
     Euler scheduler.
 
