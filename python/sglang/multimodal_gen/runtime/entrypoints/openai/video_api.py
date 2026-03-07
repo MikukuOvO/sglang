@@ -194,7 +194,7 @@ async def create_video(
     rollout: Optional[bool] = Form(False),
     rollout_sde_type: Optional[str] = Form("sde"),
     rollout_noise_level: Optional[float] = Form(0.7),
-    rollout_log_prob_no_const: Optional[bool] = Form(True),
+    rollout_log_prob_no_const: Optional[bool] = Form(False),
     output_quality: Optional[str] = Form("default"),
     output_compression: Optional[int] = Form(None),
     extra_body: Optional[str] = Form(None),
