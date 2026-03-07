@@ -33,7 +33,7 @@ from diffusers.utils import BaseOutput
 
 from sglang.multimodal_gen.runtime.models.schedulers.base import BaseScheduler
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
-from sglang.multimodal_gen.post_training.models import RLSchedulerMixin
+from sglang.multimodal_gen.runtime.post_training.models import RLSchedulerMixin
 
 logger = init_logger(__name__)
 
