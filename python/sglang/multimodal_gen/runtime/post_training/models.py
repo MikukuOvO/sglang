@@ -8,7 +8,7 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 
 
-class RLSchedulerMixin:
+class SchedulerRLMixin:
     def reset_rollout_states(self):
         """Reset rollout states, should be called at the beginning of each new request"""
         self._rollout_enabled = False
@@ -49,8 +49,8 @@ class RLSchedulerMixin:
         """flow sde sampling methods, reference: FlowGRPO"""
         self._require_rollout_enabled()
 
+        dt = current_sigma - next_sigma
         if self._rollout_param_sde_type == "sde":
-            dt = current_sigma - next_sigma
             std_dev_t = torch.sqrt(
                 current_sigma / 
                 (1 - torch.where(torch.isclose(current_sigma, current_sigma.new_tensor(1.0)),
@@ -68,7 +68,7 @@ class RLSchedulerMixin:
             log_prob_no_const = -((prev_sample - prev_sample_mean) ** 2)
 
         elif self._rollout_param_sde_type == "cps":
-            std_dev_t = next_sigma  * math.sin(self._rollout_param_noise_level * math.pi / 2) # sigma_t in paper
+            std_dev_t = next_sigma * math.sin(self._rollout_param_noise_level * math.pi / 2) # sigma_t in paper
             pred_original_sample = sample - current_sigma * model_output # predicted x_0 in paper
             noise_estimate = sample + model_output * (1 - current_sigma) # predicted x_1 in paper
             prev_sample_mean = pred_original_sample * (1 - next_sigma) + noise_estimate * torch.sqrt(next_sigma**2 - std_dev_t**2)
