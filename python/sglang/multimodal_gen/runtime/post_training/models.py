@@ -19,12 +19,12 @@ class RLSchedulerMixin:
         *,
         noise_level: float = 0.7,
         sde_type: str = "sde",
-        log_prob_without_const: bool = True
+        log_prob_no_const: bool = True
     ) -> None:
         self._rollout_enabled = True
         self._rollout_log_probs = []
         # Prepare params needed for rollout
-        self._rollout_param_log_prob_without_const = log_prob_without_const
+        self._rollout_param_log_prob_no_const = log_prob_no_const
         self._rollout_param_noise_level = float(noise_level)
         self._rollout_param_sde_type = sde_type
 
@@ -37,16 +37,6 @@ class RLSchedulerMixin:
     def _require_rollout_enabled(self) -> None:
         if not getattr(self, "_rollout_enabled", False):
             raise RuntimeError("prepare_rollout() not called before rollout")
-
-    def append_local_rollout_log_prob(self, log_prob: torch.Tensor) -> None:
-        self._require_rollout_enabled()
-        self._rollout_log_probs.append(log_prob)
-
-    def consume_local_rollout_log_probs(self) -> list[torch.Tensor]:
-        self._require_rollout_enabled()
-        values = torch.stack(self._rollout_log_probs, dim=-1)
-        self._rollout_log_probs = []
-        return values
 
     def flow_sde_sampling(
         self,
@@ -75,7 +65,7 @@ class RLSchedulerMixin:
                 dtype=model_output.dtype,
             )
             prev_sample = prev_sample_mean + std_dev_t * torch.sqrt(-1*dt) * variance_noise
-            log_prob_without_const = -((prev_sample - prev_sample_mean) ** 2)
+            log_prob_no_const = -((prev_sample - prev_sample_mean) ** 2)
 
         elif self._rollout_param_sde_type == "cps":
             std_dev_t = next_sigma  * math.sin(self._rollout_param_noise_level * math.pi / 2) # sigma_t in paper
@@ -90,19 +80,30 @@ class RLSchedulerMixin:
                 dtype=model_output.dtype,
             )
             prev_sample = prev_sample_mean + std_dev_t * variance_noise
-            log_prob_without_const = -((prev_sample - prev_sample_mean) ** 2)
+            log_prob_no_const = -((prev_sample - prev_sample_mean) ** 2)
 
         else:
             raise ValueError(f"Unsupported sde_type: {self._rollout_param_sde_type}")
 
         # Calculate log_prob
-        if self._rollout_param_log_prob_without_const:
-            log_prob = log_prob_without_const
+        if self._rollout_param_log_prob_no_const:
+            log_prob = log_prob_no_const
         else :
             log_prob = (
-                log_prob_without_const / (2 * ((std_dev_t * torch.sqrt(-1*dt))**2))
+                log_prob_no_const / (2 * ((std_dev_t * torch.sqrt(-1*dt))**2))
                 - torch.log(std_dev_t * torch.sqrt(-1*dt))
                 - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
             )
 
         return prev_sample, log_prob
+
+    # log prob utils for rollout
+    def append_local_rollout_log_prob(self, log_prob: torch.Tensor) -> None:
+        self._require_rollout_enabled()
+        self._rollout_log_probs.append(log_prob)
+
+    def consume_local_rollout_log_probs(self) -> list[torch.Tensor]:
+        self._require_rollout_enabled()
+        values = torch.stack(self._rollout_log_probs, dim=-1)
+        self._rollout_log_probs = []
+        return values
