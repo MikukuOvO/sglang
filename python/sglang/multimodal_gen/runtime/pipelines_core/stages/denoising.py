@@ -83,7 +83,7 @@ from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.runtime.utils.perf_logger import StageProfiler
 from sglang.multimodal_gen.runtime.utils.profiler import SGLDiffusionProfiler
 from sglang.multimodal_gen.utils import dict_to_3d_list, masks_like
-from sglang.multimodal_gen.post_training.pipelines import DenoisingRLMixin
+from sglang.multimodal_gen.runtime.post_training.pipelines import DenoisingRLMixin
 
 logger = init_logger(__name__)
 
