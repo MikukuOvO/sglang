@@ -58,9 +58,6 @@ from sglang.multimodal_gen.runtime.loader.component_loaders.transformer_loader i
     TransformerLoader,
 )
 from sglang.multimodal_gen.runtime.managers.forward_context import set_forward_context
-from sglang.multimodal_gen.runtime.pipelines.patches.flow_matching_with_logprob import (
-    sde_step_with_logprob,
-)
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
 from sglang.multimodal_gen.runtime.pipelines_core.stages.base import (
     PipelineStage,
