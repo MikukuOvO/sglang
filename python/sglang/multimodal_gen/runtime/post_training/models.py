@@ -94,7 +94,7 @@ class SchedulerRLMixin:
             log_prob = (
                 log_prob_no_const / (2 * (noise_std_dev**2))
                 - torch.log(noise_std_dev)
-                - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
+                - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi).to(noise_std_dev.device)))
             )
 
         return prev_sample, log_prob

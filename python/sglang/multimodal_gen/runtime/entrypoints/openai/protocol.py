@@ -21,6 +21,7 @@ class ImageResponse(BaseModel):
     data: List[ImageResponseData]
     peak_memory_mb: Optional[float] = None
     inference_time_s: Optional[float] = None
+    trajectory_log_probs: Optional[Any] = None
 
 
 class ImageGenerationsRequest(BaseModel):
@@ -72,6 +73,7 @@ class VideoResponse(BaseModel):
     file_path: Optional[str] = None
     peak_memory_mb: Optional[float] = None
     inference_time_s: Optional[float] = None
+    trajectory_log_probs: Optional[Any] = None
 
 
 class VideoGenerationsRequest(BaseModel):
