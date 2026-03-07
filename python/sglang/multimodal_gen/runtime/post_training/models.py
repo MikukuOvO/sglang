@@ -55,6 +55,7 @@ class SchedulerRLMixin:
                 current_sigma / 
                 (1 - torch.where(torch.isclose(current_sigma, current_sigma.new_tensor(1.0)),
                                                self._rollout_sigma_max, current_sigma))) * self._rollout_param_noise_level
+            noise_std_dev = std_dev_t * torch.sqrt(-1*dt)
             prev_sample_mean = sample * (1 + std_dev_t**2 / (2 * current_sigma) * dt) \
                                + model_output * (1 + std_dev_t**2 * (1 - current_sigma) / (2 * current_sigma)) * dt
             
@@ -64,11 +65,12 @@ class SchedulerRLMixin:
                 device=model_output.device,
                 dtype=model_output.dtype,
             )
-            prev_sample = prev_sample_mean + std_dev_t * torch.sqrt(-1*dt) * variance_noise
+            prev_sample = prev_sample_mean + noise_std_dev * variance_noise
             log_prob_no_const = -((prev_sample - prev_sample_mean) ** 2)
 
         elif self._rollout_param_sde_type == "cps":
             std_dev_t = next_sigma * math.sin(self._rollout_param_noise_level * math.pi / 2) # sigma_t in paper
+            noise_std_dev = std_dev_t # the std before noise in paper
             pred_original_sample = sample - current_sigma * model_output # predicted x_0 in paper
             noise_estimate = sample + model_output * (1 - current_sigma) # predicted x_1 in paper
             prev_sample_mean = pred_original_sample * (1 - next_sigma) + noise_estimate * torch.sqrt(next_sigma**2 - std_dev_t**2)
@@ -79,7 +81,7 @@ class SchedulerRLMixin:
                 device=model_output.device,
                 dtype=model_output.dtype,
             )
-            prev_sample = prev_sample_mean + std_dev_t * variance_noise
+            prev_sample = prev_sample_mean + noise_std_dev * variance_noise
             log_prob_no_const = -((prev_sample - prev_sample_mean) ** 2)
 
         else:
@@ -90,8 +92,8 @@ class SchedulerRLMixin:
             log_prob = log_prob_no_const
         else :
             log_prob = (
-                log_prob_no_const / (2 * ((std_dev_t * torch.sqrt(-1*dt))**2))
-                - torch.log(std_dev_t * torch.sqrt(-1*dt))
+                log_prob_no_const / (2 * (noise_std_dev**2))
+                - torch.log(noise_std_dev)
                 - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi)))
             )
 
