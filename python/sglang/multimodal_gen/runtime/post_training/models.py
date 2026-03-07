@@ -49,7 +49,7 @@ class SchedulerRLMixin:
         """flow sde sampling methods, reference: FlowGRPO"""
         self._require_rollout_enabled()
 
-        dt = current_sigma - next_sigma
+        dt = next_sigma - current_sigma
         if self._rollout_param_sde_type == "sde":
             std_dev_t = torch.sqrt(
                 current_sigma / 
@@ -102,7 +102,7 @@ class SchedulerRLMixin:
         self._require_rollout_enabled()
         self._rollout_log_probs.append(log_prob)
 
-    def consume_local_rollout_log_probs(self) -> list[torch.Tensor]:
+    def consume_local_rollout_log_probs(self) -> torch.Tensor:
         self._require_rollout_enabled()
         values = torch.stack(self._rollout_log_probs, dim=-1)
         self._rollout_log_probs = []

@@ -40,7 +40,7 @@ class DenoisingRLMixin:
         if batch.rollout:
             trajectory_log_probs_tensor = self.scheduler.consume_local_rollout_log_probs()
             if get_sp_world_size() > 1 and getattr(batch, "did_sp_shard_latents", False):
-                trajectory_tensor = trajectory_tensor.to(get_local_torch_device())
+                trajectory_log_probs_tensor = trajectory_log_probs_tensor.to(get_local_torch_device())
                 # gather log probs across sequence parallel workers if using sequence parallelism
                 sequence_model_parallel_all_reduce(trajectory_log_probs_tensor)
             batch.trajectory_log_probs = trajectory_log_probs_tensor.cpu()
