@@ -49,6 +49,7 @@ class ImageGenerationsRequest(BaseModel):
     rollout: Optional[bool] = False
     rollout_sde_type: Optional[str] = "sde"
     rollout_noise_level: Optional[float] = 0.7
+    rollout_log_prob_no_const: Optional[bool] = False
     diffusers_kwargs: Optional[Dict[str, Any]] = None  # kwargs for diffusers backend
 
 
@@ -104,6 +105,7 @@ class VideoGenerationsRequest(BaseModel):
     rollout: Optional[bool] = False
     rollout_sde_type: Optional[str] = "sde"
     rollout_noise_level: Optional[float] = 0.7
+    rollout_log_prob_no_const: Optional[bool] = False
     diffusers_kwargs: Optional[Dict[str, Any]] = None  # kwargs for diffusers backend
 
 

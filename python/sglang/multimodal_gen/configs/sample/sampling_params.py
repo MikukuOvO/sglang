@@ -162,6 +162,7 @@ class SamplingParams:
     rollout: bool = False
     rollout_sde_type: str = "sde"
     rollout_noise_level: float = 0.7
+    rollout_log_prob_no_const: bool = True
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
     # if True, disallow user params to override subclass-defined protected fields
@@ -832,6 +833,12 @@ class SamplingParams:
             type=float,
             default=SamplingParams.rollout_noise_level,
             help="Noise level used by rollout SDE/CPS step objective.",
+        )
+        parser.add_argument(
+            "--rollout-log-prob-no-const",
+            action=StoreBoolean,
+            default=SamplingParams.rollout_log_prob_no_const,
+            help="If true, return rollout log-prob without constant terms.",
         )
         parser.add_argument(
             "--return-trajectory-decoded",

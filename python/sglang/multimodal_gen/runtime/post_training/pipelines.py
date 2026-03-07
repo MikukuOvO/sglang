@@ -25,6 +25,7 @@ class DenoisingRLMixin:
             self.scheduler.prepare_rollout(
                 noise_level=batch.rollout_noise_level,
                 sde_type=batch.rollout_sde_type,
+                log_prob_no_const=batch.rollout_log_prob_no_const,
             )
     
     def _maybe_get_rollout_log_probs(self, batch: Req):
