@@ -73,9 +73,7 @@ from sglang.multimodal_gen.runtime.platforms import (
     AttentionBackendEnum,
     current_platform,
 )
-from sglang.multimodal_gen.runtime.post_training.scheduler_rl_mixin import (
-    SchedulerRLMixin,
-)
+from sglang.multimodal_gen.runtime.post_training import SchedulerRLMixin
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.layerwise_offload import OffloadableDiTMixin
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
