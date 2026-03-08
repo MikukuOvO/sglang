@@ -175,7 +175,7 @@ class SamplingParams:
     rollout: bool = False
     rollout_sde_type: str = "sde"
     rollout_noise_level: float = 0.7
-    rollout_log_prob_no_const: bool = False  # whether to exclude constants in rollout logprob
+    rollout_log_prob_no_const: bool = False  # exclude constants in rollout logprob
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
     # if True, disallow user params to override subclass-defined protected fields
