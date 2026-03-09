@@ -2,6 +2,7 @@
 """Flow-matching rollout step utilities for log-prob computation."""
 
 import math
+from functools import wraps
 from typing import Any, Optional, Union
 
 import torch
@@ -17,6 +18,15 @@ from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
 
 
 class SchedulerRLMixin:
+    @staticmethod
+    def require_rollout_enabled_decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            self._require_rollout_enabled()
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
     def reset_rollout_states(self):
         """Reset rollout states, should be called at the beginning of each new request"""
         self._rollout_enabled = False
@@ -48,6 +58,7 @@ class SchedulerRLMixin:
         if not getattr(self, "_rollout_enabled", False):
             raise RuntimeError("prepare_rollout() not called before rollout")
 
+    @require_rollout_enabled_decorator
     def flow_sde_sampling(
         self,
         model_output: torch.FloatTensor,
@@ -57,7 +68,6 @@ class SchedulerRLMixin:
         generator: torch.Generator,
     ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """flow sde sampling methods, reference: FlowGRPO"""
-        self._require_rollout_enabled()
 
         dt = next_sigma - current_sigma
         if self._rollout_param_sde_type == "sde":
@@ -116,24 +126,24 @@ class SchedulerRLMixin:
         return prev_sample, log_prob_local_sum, local_elem_count
 
     # log prob utils for rollout
+    @require_rollout_enabled_decorator
     def append_local_rollout_log_probs(
         self, log_prob_sum: torch.Tensor, log_prob_count: torch.Tensor
     ) -> None:
-        self._require_rollout_enabled()
         self._rollout_local_log_prob_sum.append(log_prob_sum)
         self._rollout_local_log_prob_count.append(log_prob_count)
 
+    @require_rollout_enabled_decorator
     def consume_local_rollout_log_probs(self) -> tuple[torch.Tensor, torch.Tensor]:
-        self._require_rollout_enabled()
         values_sum = torch.stack(self._rollout_local_log_prob_sum, dim=-1)
         values_count = torch.stack(self._rollout_local_log_prob_count, dim=-1)
         self._rollout_local_log_prob_sum = []
         self._rollout_local_log_prob_count = []
         return values_sum, values_count
 
+    @require_rollout_enabled_decorator
     def collect_rollout_log_probs(self, batch: Req) -> torch.Tensor | None:
         """Consume local rollout log probs and merge for all SP ranks."""
-        self._require_rollout_enabled()
 
         trajectory_log_prob_sum, trajectory_log_prob_count = (
             self.consume_local_rollout_log_probs()

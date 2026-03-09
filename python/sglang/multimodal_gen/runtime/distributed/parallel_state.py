@@ -54,7 +54,7 @@ from .group_coordinator import (
     GroupCoordinator,
     PipelineGroupCoordinator,
     SequenceParallelGroupCoordinator,
-    get_local_torch_device,
+    ,
 )
 
 logger = init_logger(__name__)
