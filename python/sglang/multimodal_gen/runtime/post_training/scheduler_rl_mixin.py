@@ -95,20 +95,24 @@ class SchedulerRLMixin:
     def _rollout_variance_noise(
         self,
         model_output: torch.FloatTensor,
-        generator: torch.Generator,
+        generator: Union[torch.Generator, list[torch.Generator]],
     ) -> torch.FloatTensor:
-        """Generate variance noise for rollout. If SP and noise_full_shape given, generate full then shard."""
+        """Generate variance noise for rollout. If generator is a list, use generator[i] for the i-th batch item."""
         noise_full_shape = getattr(self, "_rollout_param_noise_full_shape", None)
         sp_size = get_sp_world_size()
         device = model_output.device
         dtype = model_output.dtype
+
         if sp_size <= 1 or noise_full_shape is None:
-            # When sp=1, local is full shape
             local_shape = tuple(model_output.shape)
+            B = local_shape[0]
+            one_shape = (1,) + local_shape[1:]
+            gen_list = self._normalize_rollout_generators(generator, B, "model_output.shape[0]")
             buffer = self._get_or_create_rollout_noise_buffer(
                 local_shape, device, dtype
             )
-            torch.randn(local_shape, out=buffer, generator=generator)
+            for i in range(B):
+                torch.randn(one_shape, out=buffer[i : i + 1], generator=gen_list[i])
             return buffer
         full_shape = tuple(noise_full_shape)
         local_shape = model_output.shape
