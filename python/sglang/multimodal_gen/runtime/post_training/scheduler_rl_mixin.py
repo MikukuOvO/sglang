@@ -9,6 +9,7 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 from sglang.multimodal_gen.runtime.distributed import (
     get_local_torch_device,
+    get_sp_parallel_rank,
     get_sp_world_size,
 )
 from sglang.multimodal_gen.runtime.distributed.communication_op import (
@@ -38,8 +39,17 @@ class SchedulerRLMixin:
         *,
         noise_level: float = 0.7,
         sde_type: str = "sde",
-        log_prob_no_const: bool = False
+        log_prob_no_const: bool = False,
+        noise_full_shape: Optional[tuple] = None,
     ) -> None:
+        """Enable rollout and set SDE/CPS params. Call once before the denoising loop.
+
+        noise_full_shape: When using sequence parallelism (SP), pass the unsharded
+            latent shape so variance noise is generated for the full tensor then
+            sharded per rank (keeps generator deterministic). Omit or pass None for
+            single-rank or when the pipeline will not shard latents; default None
+            is correct and does not need to be set by API users.
+        """
         self._rollout_enabled = True
         self._rollout_local_log_prob_sum = []
         self._rollout_local_log_prob_count = []
@@ -47,6 +57,7 @@ class SchedulerRLMixin:
         self._rollout_param_log_prob_no_const = log_prob_no_const
         self._rollout_param_noise_level = float(noise_level)
         self._rollout_param_sde_type = sde_type
+        self._rollout_param_noise_full_shape = noise_full_shape
 
         # Prepare extra parameters for sampling
         self._rollout_sigma_max = self.sigmas[min(1, len(self.sigmas) - 1)].item()
@@ -57,6 +68,51 @@ class SchedulerRLMixin:
     def _require_rollout_enabled(self) -> None:
         if not getattr(self, "_rollout_enabled", False):
             raise RuntimeError("prepare_rollout() not called before rollout")
+
+    def _rollout_variance_noise(
+        self,
+        model_output: torch.FloatTensor,
+        generator: torch.Generator,
+    ) -> torch.FloatTensor:
+        """Generate variance noise for rollout. If SP and noise_full_shape given, generate full then shard."""
+        noise_full_shape = getattr(self, "_rollout_param_noise_full_shape", None)
+        sp_size = get_sp_world_size()
+        if sp_size <= 1 or noise_full_shape is None:
+            return randn_tensor(
+                model_output.shape,
+                generator=generator,
+                device=get_local_torch_device(),
+                dtype=model_output.dtype,
+            )
+        full_shape = tuple(noise_full_shape)
+        local_shape = model_output.shape
+        # Infer shard dim: unique d where full_shape[d] == local_shape[d] * sp_size
+        shard_dims = [
+            d
+            for d in range(len(full_shape))
+            if full_shape[d] == local_shape[d] * sp_size
+        ]
+        if len(shard_dims) != 1:
+            raise ValueError(
+                "Rollout with SP expects exactly one shard dimension "
+                "(full_shape[d] == local_shape[d] * sp_world_size). "
+                f"Got {len(shard_dims)} candidate dims (full_shape={full_shape}, "
+                f"local_shape={tuple(local_shape)}, sp_world_size={sp_size}). "
+                "Check that prepare_rollout(noise_full_shape=...) matches how "
+                "latents are sharded (e.g. single time or sequence dim)."
+            )
+        shard_dim = shard_dims[0]
+        variance_noise_full = randn_tensor(
+            full_shape,
+            generator=generator,
+            device=get_local_torch_device(),
+            dtype=model_output.dtype,
+        )
+        rank = get_sp_parallel_rank()
+        chunk_size = full_shape[shard_dim] // sp_size
+        start = rank * chunk_size
+        variance_noise = variance_noise_full.narrow(shard_dim, start, chunk_size)
+        return variance_noise
 
     @require_rollout_enabled_decorator
     def flow_sde_sampling(
@@ -69,6 +125,8 @@ class SchedulerRLMixin:
     ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """flow sde sampling methods, reference: FlowGRPO"""
 
+        variance_noise = self._rollout_variance_noise(model_output, generator)
+
         dt = next_sigma - current_sigma
         if self._rollout_param_sde_type == "sde":
             std_dev_t = torch.sqrt(
@@ -78,13 +136,7 @@ class SchedulerRLMixin:
             noise_std_dev = std_dev_t * torch.sqrt(-1*dt)
             prev_sample_mean = sample * (1 + std_dev_t**2 / (2 * current_sigma) * dt) \
                                + model_output * (1 + std_dev_t**2 * (1 - current_sigma) / (2 * current_sigma)) * dt
-            
-            variance_noise = randn_tensor(
-                model_output.shape,
-                generator=generator,
-                device=get_local_torch_device(),
-                dtype=model_output.dtype,
-            )
+
             prev_sample = prev_sample_mean + noise_std_dev * variance_noise
             log_prob_no_const = -((prev_sample - prev_sample_mean) ** 2)
 
@@ -95,12 +147,6 @@ class SchedulerRLMixin:
             noise_estimate = sample + model_output * (1 - current_sigma) # predicted x_1 in paper
             prev_sample_mean = pred_original_sample * (1 - next_sigma) + noise_estimate * torch.sqrt(next_sigma**2 - std_dev_t**2)
 
-            variance_noise = randn_tensor(
-                model_output.shape,
-                generator=generator,
-                device=get_local_torch_device(),
-                dtype=model_output.dtype,
-            )
             prev_sample = prev_sample_mean + noise_std_dev * variance_noise
             log_prob_no_const = -((prev_sample - prev_sample_mean) ** 2)
 

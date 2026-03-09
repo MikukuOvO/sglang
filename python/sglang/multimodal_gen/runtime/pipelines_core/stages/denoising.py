@@ -141,10 +141,15 @@ class DenoisingStage(PipelineStage):
 
         self.scheduler.reset_rollout_states()
         if batch.rollout:
+            # Full latent shape for SP: at prepare time latents are not sharded yet.
+            noise_full_shape = (
+                tuple(batch.latents.shape) if get_sp_world_size() > 1 else None
+            )
             self.scheduler.prepare_rollout(
                 noise_level=batch.rollout_noise_level,
                 sde_type=batch.rollout_sde_type,
                 log_prob_no_const=batch.rollout_log_prob_no_const,
+                noise_full_shape=noise_full_shape,
             )
 
     def _maybe_collect_rollout_log_probs(self, batch: Req):
@@ -580,8 +585,7 @@ class DenoisingStage(PipelineStage):
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
-            {"generator": batch.generator, "eta": batch.eta,
-             "rollout": batch.rollout},
+            {"generator": batch.generator, "eta": batch.eta, "rollout": batch.rollout},
         )
 
         # Setup precision and autocast settings

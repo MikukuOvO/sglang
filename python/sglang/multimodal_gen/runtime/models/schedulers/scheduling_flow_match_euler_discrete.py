@@ -523,7 +523,9 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin, BaseScheduler
         if rollout :
             if not self.already_prepared_rollout():
                 raise RuntimeError("prepare_rollout() should be called before rollout sampling")
-            prev_sample, log_prob_local_sum, log_prob_local_count = self.flow_sde_sampling(model_output, sample, current_sigma, next_sigma, generator)
+            prev_sample, log_prob_local_sum, log_prob_local_count = self.flow_sde_sampling(
+                model_output, sample, current_sigma, next_sigma, generator
+            )
             # save logprob for rollout
             self.append_local_rollout_log_probs(log_prob_local_sum, log_prob_local_count)
         else:
