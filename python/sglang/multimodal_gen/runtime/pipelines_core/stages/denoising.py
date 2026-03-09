@@ -163,6 +163,7 @@ class DenoisingStage(PipelineStage):
 
         if batch.rollout:
             batch.trajectory_log_probs = self.scheduler.collect_rollout_log_probs(batch)
+            self.scheduler.release_rollout_resources()
 
     def _maybe_enable_torch_compile(self, module: object) -> None:
         """
