@@ -52,8 +52,8 @@ class SchedulerRLMixin:
         self,
         model_output: torch.FloatTensor,
         sample: torch.FloatTensor,
-        current_sigma: Union[float, torch.FloatTensor],
-        next_sigma: Union[float, torch.FloatTensor],
+        current_sigma: torch.FloatTensor,
+        next_sigma: torch.FloatTensor,
         generator: torch.Generator,
     ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """flow sde sampling methods, reference: FlowGRPO"""
@@ -72,7 +72,7 @@ class SchedulerRLMixin:
             variance_noise = randn_tensor(
                 model_output.shape,
                 generator=generator,
-                device=model_output.device,
+                device=get_local_torch_device(),
                 dtype=model_output.dtype,
             )
             prev_sample = prev_sample_mean + noise_std_dev * variance_noise
@@ -88,7 +88,7 @@ class SchedulerRLMixin:
             variance_noise = randn_tensor(
                 model_output.shape,
                 generator=generator,
-                device=model_output.device,
+                device=get_local_torch_device(),
                 dtype=model_output.dtype,
             )
             prev_sample = prev_sample_mean + noise_std_dev * variance_noise
