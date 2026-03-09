@@ -6,7 +6,6 @@ from functools import wraps
 from typing import Any, Optional, Union
 
 import torch
-from diffusers.utils.torch_utils import randn_tensor
 from sglang.multimodal_gen.runtime.distributed import (
     get_local_torch_device,
     get_sp_parallel_rank,
@@ -32,8 +31,8 @@ class SchedulerRLMixin:
         """Release rollout-owned resources (e.g. noise buffer). Call when denoising ends."""
         if hasattr(self, "_rollout_noise_buffer"):
             self._rollout_noise_buffer = None
-        self._rollout_local_log_prob_sum.clear()
-        self._rollout_local_log_prob_count.clear()
+        self._rollout_local_log_prob_sum = []
+        self._rollout_local_log_prob_count = []
 
     def reset_rollout_states(self):
         """Reset rollout states, should be called at the beginning of each new request"""
@@ -81,7 +80,7 @@ class SchedulerRLMixin:
         device: torch.device,
         dtype: torch.dtype,
     ) -> torch.Tensor:
-        """Get or create the reusable full-shape noise buffer for SP rollout."""
+        """Get or create the reusable noise buffer (local or full shape) for rollout."""
         buffer = getattr(self, "_rollout_noise_buffer", None)
         if (
             buffer is None
@@ -101,15 +100,30 @@ class SchedulerRLMixin:
         """Generate variance noise for rollout. If SP and noise_full_shape given, generate full then shard."""
         noise_full_shape = getattr(self, "_rollout_param_noise_full_shape", None)
         sp_size = get_sp_world_size()
+        device = model_output.device
+        dtype = model_output.dtype
         if sp_size <= 1 or noise_full_shape is None:
-            return randn_tensor(
-                model_output.shape,
-                generator=generator,
-                device=get_local_torch_device(),
-                dtype=model_output.dtype,
+            # When sp=1, local is full shape
+            local_shape = tuple(model_output.shape)
+            buffer = self._get_or_create_rollout_noise_buffer(
+                local_shape, device, dtype
             )
+            torch.randn(local_shape, out=buffer, generator=generator)
+            return buffer
         full_shape = tuple(noise_full_shape)
         local_shape = model_output.shape
+        # full_shape = batch.latents at prepare_rollout (before shard);
+        # local_shape = model_output (noise_pred). They must have same ndim.
+        if len(full_shape) != len(local_shape):
+            raise ValueError(
+                "Rollout with SP: noise_full_shape and model_output must have same ndim. "
+                f"Got full_shape={full_shape} (ndim={len(full_shape)}), "
+                f"local_shape={tuple(local_shape)} (ndim={len(local_shape)}). "
+                "full_shape is batch.latents at prepare_rollout (before shard); "
+                "local_shape is model_output (noise_pred). If local has fewer dims (e.g. "
+                "4D vs 5D), the batch dimension may be squeezed somewhere before "
+                "scheduler.step(); fix the pipeline to keep the same ndim as latents."
+            )
         # Infer shard dim: unique d where full_shape[d] == local_shape[d] * sp_size
         shard_dims = [
             d
@@ -121,15 +135,11 @@ class SchedulerRLMixin:
                 "Rollout with SP expects exactly one shard dimension "
                 "(full_shape[d] == local_shape[d] * sp_world_size). "
                 f"Got {len(shard_dims)} candidate dims (full_shape={full_shape}, "
-                f"local_shape={tuple(local_shape)}, sp_world_size={sp_size}). "
-                "Check that prepare_rollout(noise_full_shape=...) matches how "
-                "latents are sharded (e.g. single time or sequence dim)."
+                f"local_shape={tuple(local_shape)}, sp_world_size={sp_size})."
             )
         shard_dim = shard_dims[0]
-        device = model_output.device
-        dtype = model_output.dtype
         buffer = self._get_or_create_rollout_noise_buffer(full_shape, device, dtype)
-        torch.randn(*full_shape, out=buffer, generator=generator)
+        torch.randn(full_shape, out=buffer, generator=generator)
         rank = get_sp_parallel_rank()
         chunk_size = full_shape[shard_dim] // sp_size
         start = rank * chunk_size
