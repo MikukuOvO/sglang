@@ -98,26 +98,29 @@ class SchedulerRLMixin:
         generator: Union[torch.Generator, list[torch.Generator]],
     ) -> torch.FloatTensor:
         """Generate variance noise for rollout. If generator is a list, use generator[i] for the i-th batch item."""
+        assert generator is not None, "Generator must be provided"
         noise_full_shape = getattr(self, "_rollout_param_noise_full_shape", None)
         sp_size = get_sp_world_size()
         device = model_output.device
         dtype = model_output.dtype
+        local_shape = tuple(model_output.shape)
+        one_local_shape = (1,) + local_shape[1:]
+    
+        B = local_shape[0]
+        if isinstance(generator, torch.Generator):
+            assert B == 1, "Generator must be a list if batch size is not 1"
+            generator = [generator]
 
         if sp_size <= 1 or noise_full_shape is None:
-            local_shape = tuple(model_output.shape)
-            B = local_shape[0]
-            one_shape = (1,) + local_shape[1:]
-            gen_list = self._normalize_rollout_generators(generator, B, "model_output.shape[0]")
             buffer = self._get_or_create_rollout_noise_buffer(
                 local_shape, device, dtype
             )
             for i in range(B):
-                torch.randn(one_shape, out=buffer[i : i + 1], generator=gen_list[i])
+                torch.randn(one_local_shape, out=buffer[i : i + 1], generator=generator[i])
             return buffer
+        
         full_shape = tuple(noise_full_shape)
-        local_shape = model_output.shape
-        # full_shape = batch.latents at prepare_rollout (before shard);
-        # local_shape = model_output (noise_pred). They must have same ndim.
+        one_full_shape = (1,) + full_shape[1:]
         if len(full_shape) != len(local_shape):
             raise ValueError(
                 "Rollout with SP: noise_full_shape and model_output must have same ndim. "
@@ -142,8 +145,10 @@ class SchedulerRLMixin:
                 f"local_shape={tuple(local_shape)}, sp_world_size={sp_size})."
             )
         shard_dim = shard_dims[0]
+
         buffer = self._get_or_create_rollout_noise_buffer(full_shape, device, dtype)
-        torch.randn(full_shape, out=buffer, generator=generator)
+        for i in range(B):
+            torch.randn(one_full_shape, out=buffer[i : i + 1], generator=generator[i])
         rank = get_sp_parallel_rank()
         chunk_size = full_shape[shard_dim] // sp_size
         start = rank * chunk_size
