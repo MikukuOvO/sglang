@@ -28,11 +28,17 @@ class SchedulerRLMixin:
 
         return wrapper
 
+    def release_rollout_resources(self) -> None:
+        """Release rollout-owned resources (e.g. noise buffer). Call when denoising ends."""
+        if hasattr(self, "_rollout_noise_buffer"):
+            self._rollout_noise_buffer = None
+        self._rollout_local_log_prob_sum.clear()
+        self._rollout_local_log_prob_count.clear()
+
     def reset_rollout_states(self):
         """Reset rollout states, should be called at the beginning of each new request"""
         self._rollout_enabled = False
-        self._rollout_local_log_prob_sum = []
-        self._rollout_local_log_prob_count = []
+        self.release_rollout_resources()
 
     def prepare_rollout(
         self,
@@ -69,6 +75,24 @@ class SchedulerRLMixin:
         if not getattr(self, "_rollout_enabled", False):
             raise RuntimeError("prepare_rollout() not called before rollout")
 
+    def _get_or_create_rollout_noise_buffer(
+        self,
+        full_shape: tuple,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """Get or create the reusable full-shape noise buffer for SP rollout."""
+        buffer = getattr(self, "_rollout_noise_buffer", None)
+        if (
+            buffer is None
+            or buffer.shape != full_shape
+            or buffer.dtype != dtype
+            or buffer.device != device
+        ):
+            buffer = torch.empty(full_shape, device=device, dtype=dtype)
+            self._rollout_noise_buffer = buffer
+        return buffer
+
     def _rollout_variance_noise(
         self,
         model_output: torch.FloatTensor,
@@ -102,16 +126,14 @@ class SchedulerRLMixin:
                 "latents are sharded (e.g. single time or sequence dim)."
             )
         shard_dim = shard_dims[0]
-        variance_noise_full = randn_tensor(
-            full_shape,
-            generator=generator,
-            device=get_local_torch_device(),
-            dtype=model_output.dtype,
-        )
+        device = model_output.device
+        dtype = model_output.dtype
+        buffer = self._get_or_create_rollout_noise_buffer(full_shape, device, dtype)
+        torch.randn(*full_shape, out=buffer, generator=generator)
         rank = get_sp_parallel_rank()
         chunk_size = full_shape[shard_dim] // sp_size
         start = rank * chunk_size
-        variance_noise = variance_noise_full.narrow(shard_dim, start, chunk_size)
+        variance_noise = buffer.narrow(shard_dim, start, chunk_size)
         return variance_noise
 
     @require_rollout_enabled_decorator
