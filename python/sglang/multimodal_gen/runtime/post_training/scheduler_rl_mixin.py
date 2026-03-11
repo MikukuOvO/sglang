@@ -12,6 +12,7 @@ from sglang.multimodal_gen.runtime.distributed import (
     get_sp_world_size,
 )
 from sglang.multimodal_gen.runtime.distributed.communication_op import (
+    sequence_model_parallel_all_gather,
     sequence_model_parallel_all_reduce,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
@@ -33,6 +34,8 @@ class SchedulerRLMixin:
             self._rollout_noise_buffer = None
         self._rollout_local_log_prob_sum = []
         self._rollout_local_log_prob_count = []
+        if hasattr(self, "_rollout_variance_noises"):
+            self._rollout_variance_noises = []
 
     def reset_rollout_states(self):
         """Reset rollout states, should be called at the beginning of each new request"""
@@ -58,6 +61,7 @@ class SchedulerRLMixin:
         self._rollout_enabled = True
         self._rollout_local_log_prob_sum = []
         self._rollout_local_log_prob_count = []
+        self._rollout_variance_noises = []
         # Prepare params needed for rollout
         self._rollout_param_log_prob_no_const = log_prob_no_const
         self._rollout_param_noise_level = float(noise_level)
@@ -167,6 +171,7 @@ class SchedulerRLMixin:
         """flow sde sampling methods, reference: FlowGRPO"""
 
         variance_noise = self._rollout_variance_noise(model_output, generator)
+        self._rollout_variance_noises.append(variance_noise.detach().clone())
 
         dt = next_sigma - current_sigma
         if self._rollout_param_sde_type == "sde":
@@ -248,3 +253,39 @@ class SchedulerRLMixin:
         # trajectory_log_probs_tensor: [B, T], reduced as global_mean = global_sum / global_count.
         trajectory_log_probs_tensor = trajectory_log_prob_sum / trajectory_log_prob_count
         return trajectory_log_probs_tensor.cpu()
+
+    @require_rollout_enabled_decorator
+    def collect_rollout_variance_noises(self, batch: Req) -> list[torch.Tensor] | None:
+        """Consume stored rollout variance noises (one per step). With SP, gather to full shape per step."""
+        noises = getattr(self, "_rollout_variance_noises", None)
+        if noises is None or len(noises) == 0:
+            self._rollout_variance_noises = []
+            return None
+        sp_size = get_sp_world_size()
+        noise_full_shape = getattr(self, "_rollout_param_noise_full_shape", None)
+        did_sp = sp_size > 1 and getattr(batch, "did_sp_shard_latents", False)
+        out: list[torch.Tensor] = []
+        if not did_sp or noise_full_shape is None:
+            for t in noises:
+                out.append(t.cpu())
+        else:
+            full_shape = tuple(noise_full_shape)
+            local_shape = tuple(noises[0].shape)
+            shard_dims = [
+                d
+                for d in range(len(full_shape))
+                if full_shape[d] == local_shape[d] * sp_size
+            ]
+            if len(shard_dims) != 1:
+                raise ValueError(
+                    "Rollout variance noise gather with SP expects exactly one shard "
+                    f"dimension (full_shape[d] == local_shape[d] * sp_size). "
+                    f"Got {len(shard_dims)} candidate dims (full_shape={full_shape}, "
+                    f"local_shape={local_shape}, sp_size={sp_size})."
+                )
+            shard_dim = shard_dims[0]
+            for t in noises:
+                gathered = sequence_model_parallel_all_gather(t, dim=shard_dim)
+                out.append(gathered.cpu())
+        self._rollout_variance_noises = []
+        return out

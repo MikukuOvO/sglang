@@ -109,6 +109,7 @@ class GenerationResult:
     trajectory_latents: Any = None
     trajectory_timesteps: Any = None
     trajectory_log_probs: Any = None
+    trajectory_variance_noises: Any = None
     trajectory_decoded: Any = None
     prompt_index: int = 0
     output_file_path: str | None = None
