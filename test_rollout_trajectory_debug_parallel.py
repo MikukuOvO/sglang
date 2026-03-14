@@ -231,12 +231,27 @@ def compare_lists(
     return out
 
 
-def format_array_full(arr: np.ndarray) -> str:
-    """Return a full, non-truncated textual dump for numpy array."""
+def summarize_shapes(arr_list: list[np.ndarray]) -> str:
+    """Summarize per-step tensor shapes for table output."""
+    if not arr_list:
+        return "-"
+    shapes = [tuple(arr.shape) for arr in arr_list]
+    unique = []
+    for s in shapes:
+        if s not in unique:
+            unique.append(s)
+    if len(unique) == 1:
+        return f"steps={len(shapes)}, shape={unique[0]}"
+    return "; ".join(f"s{i}:{s}" for i, s in enumerate(shapes))
+
+
+def format_array_preview(arr: np.ndarray) -> str:
+    """Return a truncated textual dump similar to tensor print preview."""
     return np.array2string(
         arr,
-        threshold=np.inf,
-        max_line_width=200,
+        threshold=32,
+        edgeitems=2,
+        max_line_width=140,
         separator=", ",
         precision=8,
         floatmode="maxprec_equal",
@@ -284,7 +299,7 @@ def write_tensor_dump_file(
                 if step_idx < len(v_steps):
                     v = v_steps[step_idx]
                     lines.append(f"- variance_noise shape={v.shape}")
-                    lines.append(format_array_full(v))
+                    lines.append(format_array_preview(v))
                     lines.append("")
                 else:
                     lines.append("- variance_noise: <missing>")
@@ -293,7 +308,7 @@ def write_tensor_dump_file(
                 if step_idx < len(p_steps):
                     p = p_steps[step_idx]
                     lines.append(f"- prev_sample_mean shape={p.shape}")
-                    lines.append(format_array_full(p))
+                    lines.append(format_array_preview(p))
                     lines.append("")
                 else:
                     lines.append("- prev_sample_mean: <missing>")
@@ -302,7 +317,7 @@ def write_tensor_dump_file(
                 if step_idx < len(s_steps):
                     s = s_steps[step_idx]
                     lines.append(f"- noise_std_dev shape={s.shape}")
-                    lines.append(format_array_full(s))
+                    lines.append(format_array_preview(s))
                     lines.append("")
                 else:
                     lines.append("- noise_std_dev: <missing>")
@@ -438,16 +453,22 @@ def main() -> None:
             continue
         lines.append(f"## Mode: {mode}")
         lines.append("")
-        lines.append("| config | variance_noise max_abs_diff | variance_noise all_match | prev_sample_mean max_abs_diff | prev_sample_mean all_match | noise_std_dev max_abs_diff | noise_std_dev all_match |")
-        lines.append("|--------|-----------------------------|--------------------------|-------------------------------|---------------------------|---------------------------|-------------------------|")
+        lines.append("| config | variance_noise shape | variance_noise max_abs_diff | variance_noise all_match | prev_sample_mean shape | prev_sample_mean max_abs_diff | prev_sample_mean all_match | noise_std_dev shape | noise_std_dev max_abs_diff | noise_std_dev all_match |")
+        lines.append("|--------|----------------------|-----------------------------|--------------------------|------------------------|-------------------------------|---------------------------|---------------------|---------------------------|-------------------------|")
         for row in report[mode]:
+            cur_v, cur_p, cur_s = data[mode][row["config"]]
+            v_shape = summarize_shapes(cur_v)
             v_diff = row.get("variance_noise_max_abs_diff", "")
             v_ok = row.get("variance_noise_all_steps_match", "")
+            p_shape = summarize_shapes(cur_p)
             p_diff = row.get("prev_sample_mean_max_abs_diff", "")
             p_ok = row.get("prev_sample_mean_all_steps_match", "")
+            s_shape = summarize_shapes(cur_s)
             s_diff = row.get("noise_std_dev_max_abs_diff", "")
             s_ok = row.get("noise_std_dev_all_steps_match", "")
-            lines.append(f"| {row['config']} | {v_diff} | {v_ok} | {p_diff} | {p_ok} | {s_diff} | {s_ok} |")
+            lines.append(
+                f"| {row['config']} | {v_shape} | {v_diff} | {v_ok} | {p_shape} | {p_diff} | {p_ok} | {s_shape} | {s_diff} | {s_ok} |"
+            )
         lines.append("")
     report_path = out_root / "trajectory_debug_report.md"
     report_path.write_text("\n".join(lines), encoding="utf-8")
