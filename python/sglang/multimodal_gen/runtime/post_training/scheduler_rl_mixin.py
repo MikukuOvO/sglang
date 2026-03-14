@@ -8,11 +8,9 @@ from typing import Any, Optional, Union
 import torch
 from sglang.multimodal_gen.runtime.distributed import (
     get_local_torch_device,
-    get_sp_parallel_rank,
     get_sp_world_size,
 )
 from sglang.multimodal_gen.runtime.distributed.communication_op import (
-    sequence_model_parallel_all_gather,
     sequence_model_parallel_all_reduce,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
@@ -32,6 +30,7 @@ class SchedulerRLMixin:
         """Release rollout-owned resources (e.g. noise buffer). Call when denoising ends."""
         if hasattr(self, "_rollout_noise_buffer"):
             self._rollout_noise_buffer = None
+        self._rollout_ctx = None
         self._rollout_local_log_prob_sum = []
         self._rollout_local_log_prob_count = []
         self._rollout_local_variance_noises = []
@@ -43,14 +42,7 @@ class SchedulerRLMixin:
         self._rollout_enabled = False
         self.release_rollout_resources()
 
-    def prepare_rollout(
-        self,
-        *,
-        noise_level: float = 0.7,
-        sde_type: str = "sde",
-        log_prob_no_const: bool = False,
-        noise_full_shape: Optional[tuple] = None,
-    ) -> None:
+    def prepare_rollout(self, batch: Req) -> None:
         """Enable rollout and set SDE/CPS params. Call once before the denoising loop.
 
         noise_full_shape: When using sequence parallelism (SP), pass the unsharded
@@ -65,11 +57,22 @@ class SchedulerRLMixin:
         self._rollout_local_variance_noises = []
         self._rollout_local_prev_sample_means = []
         self._rollout_local_noise_std_devs = []
+        log_prob_no_const = batch.rollout_log_prob_no_const
+        noise_full_shape = tuple(batch.latents.shape) if get_sp_world_size() > 1 else None
+        pipeline_config = getattr(batch, "_rollout_pipeline_config", None)
+        if get_sp_world_size() > 1 and pipeline_config is None:
+            raise RuntimeError(
+                "SP rollout requires batch._rollout_pipeline_config to be set before prepare_rollout()."
+            )
         # Prepare params needed for rollout
         self._rollout_param_log_prob_no_const = log_prob_no_const
-        self._rollout_param_noise_level = float(noise_level)
-        self._rollout_param_sde_type = sde_type
+        self._rollout_param_noise_level = float(batch.rollout_noise_level)
+        self._rollout_param_sde_type = batch.rollout_sde_type
         self._rollout_param_noise_full_shape = noise_full_shape
+        self._rollout_ctx = {
+            "pipeline_config": pipeline_config,
+            "sp_batch": batch,
+        }
 
         # Prepare extra parameters for sampling
         self._rollout_sigma_max = self.sigmas[min(1, len(self.sigmas) - 1)].item()
@@ -138,29 +141,12 @@ class SchedulerRLMixin:
                 "4D vs 5D), the batch dimension may be squeezed somewhere before "
                 "scheduler.step(); fix the pipeline to keep the same ndim as latents."
             )
-        # Infer shard dim: unique d where full_shape[d] == local_shape[d] * sp_size
-        shard_dims = [
-            d
-            for d in range(len(full_shape))
-            if full_shape[d] == local_shape[d] * sp_size
-        ]
-        if len(shard_dims) != 1:
-            raise ValueError(
-                "Rollout with SP expects exactly one shard dimension "
-                "(full_shape[d] == local_shape[d] * sp_world_size). "
-                f"Got {len(shard_dims)} candidate dims (full_shape={full_shape}, "
-                f"local_shape={tuple(local_shape)}, sp_world_size={sp_size})."
-            )
-        shard_dim = shard_dims[0]
-
         buffer = self._get_or_create_rollout_noise_buffer(full_shape, device, dtype)
         for i in range(B):
             torch.randn(one_full_shape, out=buffer[i : i + 1], generator=generator[i])
-        rank = get_sp_parallel_rank()
-        chunk_size = full_shape[shard_dim] // sp_size
-        start = rank * chunk_size
-        variance_noise = buffer.narrow(shard_dim, start, chunk_size)
-        return variance_noise
+        pipeline_config = self._rollout_ctx["pipeline_config"]
+        batch = self._rollout_ctx["batch"]
+        return pipeline_config.shard_latents_for_sp(batch, buffer)
 
     @require_rollout_enabled_decorator
     def flow_sde_sampling(
@@ -307,18 +293,33 @@ class SchedulerRLMixin:
             variance_noises = variance_noises.to(get_local_torch_device())
             prev_sample_means = prev_sample_means.to(get_local_torch_device())
             noise_std_devs = noise_std_devs.to(get_local_torch_device())
+            pipeline_config = self._rollout_ctx["pipeline_config"]
+            bsz, num_steps = variance_noises.shape[0], variance_noises.shape[1]
+            
+            # [B, T, ...] -> [B*T, ...]
+            variance_noises_packed = variance_noises.contiguous().reshape(
+                bsz * num_steps, *variance_noises.shape[2:]
+            )
+            prev_sample_means_packed = prev_sample_means.contiguous().reshape(
+                bsz * num_steps, *prev_sample_means.shape[2:]
+            )
 
-            # tensor shapes:
-            # - video: [B, T, C, F_local, H, W] -> gather on dim=3
-            # - image: [B, T, S_local, D] -> gather on dim=2
-            gather_dim = 3 if variance_noises.dim() >= 6 else 2
-            variance_noises = sequence_model_parallel_all_gather(
-                variance_noises, dim=gather_dim
+            # Gather on packed tensors first.
+            variance_noises_packed = pipeline_config.gather_latents_for_sp(
+                variance_noises_packed
             )
-            prev_sample_means = sequence_model_parallel_all_gather(
-                prev_sample_means, dim=gather_dim
+            prev_sample_means_packed = pipeline_config.gather_latents_for_sp(
+                prev_sample_means_packed
             )
-            # noise_std_devs is [B, T], not a sharded latent tensor.
+
+            # Unpack back to [B, T, ...].
+            variance_noises = variance_noises_packed.reshape(
+                bsz, num_steps, *variance_noises_packed.shape[1:]
+            )
+            prev_sample_means = prev_sample_means_packed.reshape(
+                bsz, num_steps, *prev_sample_means_packed.shape[1:]
+            )
+            # noise_std_devs is same on every device, not a sharded latent tensor.
 
         return (
             variance_noises.cpu(),

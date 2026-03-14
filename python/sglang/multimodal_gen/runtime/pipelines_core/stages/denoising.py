@@ -141,16 +141,10 @@ class DenoisingStage(PipelineStage):
 
         self.scheduler.reset_rollout_states()
         if batch.rollout:
-            # Full latent shape for SP: at prepare time latents are not sharded yet.
-            noise_full_shape = (
-                tuple(batch.latents.shape) if get_sp_world_size() > 1 else None
-            )
-            self.scheduler.prepare_rollout(
-                noise_level=batch.rollout_noise_level,
-                sde_type=batch.rollout_sde_type,
-                log_prob_no_const=batch.rollout_log_prob_no_const,
-                noise_full_shape=noise_full_shape,
-            )
+            # Attach pipeline config to batch so scheduler can prepare rollout context
+            # from a single input object.
+            batch._rollout_pipeline_config = self.server_args.pipeline_config
+            self.scheduler.prepare_rollout(batch=batch)
 
     def _maybe_collect_rollout_log_probs(self, batch: Req):
         """Get rollout log probs and store into batch for reward calculation."""
