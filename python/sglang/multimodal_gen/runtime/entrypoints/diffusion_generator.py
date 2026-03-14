@@ -254,6 +254,9 @@ class DiffGenerator:
                         trajectory_latents=output_batch.trajectory_latents,
                         trajectory_timesteps=output_batch.trajectory_timesteps,
                         trajectory_log_probs=output_batch.trajectory_log_probs,
+                        trajectory_variance_noises=output_batch.trajectory_variance_noises,
+                        trajectory_prev_sample_means=output_batch.trajectory_prev_sample_means,
+                        trajectory_noise_std_devs=output_batch.trajectory_noise_std_devs,
                         trajectory_decoded=output_batch.trajectory_decoded,
                     )
 
