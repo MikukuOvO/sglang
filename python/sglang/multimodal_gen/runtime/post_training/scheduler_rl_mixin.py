@@ -69,9 +69,10 @@ class SchedulerRLMixin:
         self._rollout_param_noise_level = float(batch.rollout_noise_level)
         self._rollout_param_sde_type = batch.rollout_sde_type
         self._rollout_param_noise_full_shape = noise_full_shape
+        # Use rollout_ctx to store any external context needed for rollout
         self._rollout_ctx = {
             "pipeline_config": pipeline_config,
-            "sp_batch": batch,
+            "batch": batch,
         }
 
         # Prepare extra parameters for sampling
@@ -295,7 +296,7 @@ class SchedulerRLMixin:
             noise_std_devs = noise_std_devs.to(get_local_torch_device())
             pipeline_config = self._rollout_ctx["pipeline_config"]
             bsz, num_steps = variance_noises.shape[0], variance_noises.shape[1]
-            
+
             # [B, T, ...] -> [B*T, ...]
             variance_noises_packed = variance_noises.contiguous().reshape(
                 bsz * num_steps, *variance_noises.shape[2:]
