@@ -43,14 +43,7 @@ class SchedulerRLMixin:
         self.release_rollout_resources()
 
     def prepare_rollout(self, batch: Req) -> None:
-        """Enable rollout and set SDE/CPS params. Call once before the denoising loop.
-
-        noise_full_shape: When using sequence parallelism (SP), pass the unsharded
-            latent shape so variance noise is generated for the full tensor then
-            sharded per rank (keeps generator deterministic). Omit or pass None for
-            single-rank or when the pipeline will not shard latents; default None
-            is correct and does not need to be set by API users.
-        """
+        """Enable rollout and set SDE/CPS params. Call once before the denoising loop."""
         self._rollout_enabled = True
         self._rollout_local_log_prob_sum = []
         self._rollout_local_log_prob_count = []
@@ -58,7 +51,6 @@ class SchedulerRLMixin:
         self._rollout_local_prev_sample_means = []
         self._rollout_local_noise_std_devs = []
         log_prob_no_const = batch.rollout_log_prob_no_const
-        noise_full_shape = tuple(batch.latents.shape) if get_sp_world_size() > 1 else None
         pipeline_config = getattr(batch, "_rollout_pipeline_config", None)
         if get_sp_world_size() > 1 and pipeline_config is None:
             raise RuntimeError(
@@ -68,11 +60,11 @@ class SchedulerRLMixin:
         self._rollout_param_log_prob_no_const = log_prob_no_const
         self._rollout_param_noise_level = float(batch.rollout_noise_level)
         self._rollout_param_sde_type = batch.rollout_sde_type
-        self._rollout_param_noise_full_shape = noise_full_shape
+        self._rollout_latents_shape = tuple(batch.latents.shape) if batch.latents is not None else None
         # Use rollout_ctx to store any external context needed for rollout
         self._rollout_ctx = {
             "pipeline_config": pipeline_config,
-            "batch": batch,
+            "batch": batch
         }
 
         # Prepare extra parameters for sampling
@@ -110,44 +102,32 @@ class SchedulerRLMixin:
     ) -> torch.FloatTensor:
         """Generate variance noise for rollout. If generator is a list, use generator[i] for the i-th batch item."""
         assert generator is not None, "Generator must be provided"
-        noise_full_shape = getattr(self, "_rollout_param_noise_full_shape", None)
-        sp_size = get_sp_world_size()
+
         device = model_output.device
         dtype = model_output.dtype
         local_shape = tuple(model_output.shape)
-        one_local_shape = (1,) + local_shape[1:]
-    
+        batch = self._rollout_ctx["batch"]
+        pipeline_config = self._rollout_ctx["pipeline_config"]
+
+        # Check generator validity
         B = local_shape[0]
         if isinstance(generator, torch.Generator):
             assert B == 1, "Generator must be a list if batch size is not 1"
             generator = [generator]
+        else:
+            assert len(generator) == B, "Generator list must have the same length as batch size"
 
-        if sp_size <= 1 or noise_full_shape is None:
-            buffer = self._get_or_create_rollout_noise_buffer(
-                local_shape, device, dtype
-            )
-            for i in range(B):
-                torch.randn(one_local_shape, out=buffer[i : i + 1], generator=generator[i])
-            return buffer
-        
-        full_shape = tuple(noise_full_shape)
-        one_full_shape = (1,) + full_shape[1:]
-        if len(full_shape) != len(local_shape):
-            raise ValueError(
-                "Rollout with SP: noise_full_shape and model_output must have same ndim. "
-                f"Got full_shape={full_shape} (ndim={len(full_shape)}), "
-                f"local_shape={tuple(local_shape)} (ndim={len(local_shape)}). "
-                "full_shape is batch.latents at prepare_rollout (before shard); "
-                "local_shape is model_output (noise_pred). If local has fewer dims (e.g. "
-                "4D vs 5D), the batch dimension may be squeezed somewhere before "
-                "scheduler.step(); fix the pipeline to keep the same ndim as latents."
-            )
-        buffer = self._get_or_create_rollout_noise_buffer(full_shape, device, dtype)
+        buffer = self._get_or_create_rollout_noise_buffer(self._rollout_latents_shape, device, dtype)
         for i in range(B):
-            torch.randn(one_full_shape, out=buffer[i : i + 1], generator=generator[i])
-        pipeline_config = self._rollout_ctx["pipeline_config"]
-        batch = self._rollout_ctx["batch"]
-        return pipeline_config.shard_latents_for_sp(batch, buffer)
+            torch.randn(self._rollout_latents_shape, out=buffer[i : i + 1], generator=generator[i])
+
+        sharded_noise, _ = pipeline_config.shard_latents_for_sp(batch, buffer)
+        if tuple(sharded_noise.shape) != local_shape:
+            raise ValueError(
+                "Rollout SP noise shape mismatch after shard. "
+                f"Expected local_shape={local_shape}, got {tuple(sharded_noise.shape)}."
+            )
+        return sharded_noise
 
     @require_rollout_enabled_decorator
     def flow_sde_sampling(
