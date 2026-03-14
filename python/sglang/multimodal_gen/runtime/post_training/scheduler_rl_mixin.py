@@ -12,6 +12,7 @@ from sglang.multimodal_gen.runtime.distributed import (
     get_sp_world_size,
 )
 from sglang.multimodal_gen.runtime.distributed.communication_op import (
+    sequence_model_parallel_all_gather,
     sequence_model_parallel_all_reduce,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
@@ -33,6 +34,9 @@ class SchedulerRLMixin:
             self._rollout_noise_buffer = None
         self._rollout_local_log_prob_sum = []
         self._rollout_local_log_prob_count = []
+        self._rollout_local_variance_noises = []
+        self._rollout_local_prev_sample_means = []
+        self._rollout_local_noise_std_devs = []
 
     def reset_rollout_states(self):
         """Reset rollout states, should be called at the beginning of each new request"""
@@ -58,6 +62,9 @@ class SchedulerRLMixin:
         self._rollout_enabled = True
         self._rollout_local_log_prob_sum = []
         self._rollout_local_log_prob_count = []
+        self._rollout_local_variance_noises = []
+        self._rollout_local_prev_sample_means = []
+        self._rollout_local_noise_std_devs = []
         # Prepare params needed for rollout
         self._rollout_param_log_prob_no_const = log_prob_no_const
         self._rollout_param_noise_level = float(noise_level)
@@ -210,6 +217,12 @@ class SchedulerRLMixin:
                 - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi).to(noise_std_dev.device)))
             ).sum(dim=list(range(1, len(log_prob_no_const.shape))))
 
+        self.append_local_rollout_debug_tensors(
+            variance_noise=variance_noise,
+            prev_sample_mean=prev_sample_mean,
+            noise_std_dev=noise_std_dev,
+        )
+
         return prev_sample, log_prob_local_sum, local_elem_count
 
     # log prob utils for rollout
@@ -248,3 +261,68 @@ class SchedulerRLMixin:
         # trajectory_log_probs_tensor: [B, T], reduced as global_mean = global_sum / global_count.
         trajectory_log_probs_tensor = trajectory_log_prob_sum / trajectory_log_prob_count
         return trajectory_log_probs_tensor.cpu()
+
+    @require_rollout_enabled_decorator
+    def append_local_rollout_debug_tensors(
+        self,
+        *,
+        variance_noise: torch.Tensor,
+        prev_sample_mean: torch.Tensor,
+        noise_std_dev: torch.Tensor,
+    ) -> None:
+        self._rollout_local_variance_noises.append(variance_noise)
+        self._rollout_local_prev_sample_means.append(prev_sample_mean)
+        self._rollout_local_noise_std_devs.append(noise_std_dev)
+
+    @require_rollout_enabled_decorator
+    def consume_local_rollout_debug_tensors(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        variance_noises = torch.stack(self._rollout_local_variance_noises, dim=1)
+        prev_sample_means = torch.stack(self._rollout_local_prev_sample_means, dim=1)
+        noise_std_devs = torch.stack(self._rollout_local_noise_std_devs, dim=1)
+        self._rollout_local_variance_noises = []
+        self._rollout_local_prev_sample_means = []
+        self._rollout_local_noise_std_devs = []
+        return variance_noises, prev_sample_means, noise_std_devs
+
+    @require_rollout_enabled_decorator
+    def collect_rollout_debug_tensors(
+        self, batch: Req
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Consume rollout debug tensors and merge for all SP ranks.
+
+        Returns three tensors with shape [B, T, ...]:
+        - variance_noises
+        - prev_sample_means
+        - noise_std_devs
+        """
+        variance_noises, prev_sample_means, noise_std_devs = (
+            self.consume_local_rollout_debug_tensors()
+        )
+
+        if get_sp_world_size() > 1 and getattr(batch, "did_sp_shard_latents", False):
+            variance_noises = variance_noises.to(get_local_torch_device())
+            prev_sample_means = prev_sample_means.to(get_local_torch_device())
+            noise_std_devs = noise_std_devs.to(get_local_torch_device())
+
+            # tensor shapes:
+            # - video: [B, T, C, F_local, H, W] -> gather on dim=3
+            # - image: [B, T, S_local, D] -> gather on dim=2
+            gather_dim = 3 if variance_noises.dim() >= 6 else 2
+            variance_noises = sequence_model_parallel_all_gather(
+                variance_noises, dim=gather_dim
+            )
+            prev_sample_means = sequence_model_parallel_all_gather(
+                prev_sample_means, dim=gather_dim
+            )
+            noise_std_devs = sequence_model_parallel_all_gather(
+                noise_std_devs, dim=gather_dim
+            )
+
+        return (
+            variance_noises.cpu(),
+            prev_sample_means.cpu(),
+            noise_std_devs.cpu(),
+        )
