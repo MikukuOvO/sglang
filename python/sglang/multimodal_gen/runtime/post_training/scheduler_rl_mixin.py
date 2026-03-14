@@ -317,9 +317,7 @@ class SchedulerRLMixin:
             prev_sample_means = sequence_model_parallel_all_gather(
                 prev_sample_means, dim=gather_dim
             )
-            noise_std_devs = sequence_model_parallel_all_gather(
-                noise_std_devs, dim=gather_dim
-            )
+            # noise_std_devs is [B, T], not a sharded latent tensor.
 
         return (
             variance_noises.cpu(),
