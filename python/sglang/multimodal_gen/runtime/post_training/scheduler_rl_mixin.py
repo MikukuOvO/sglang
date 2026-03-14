@@ -270,9 +270,10 @@ class SchedulerRLMixin:
         prev_sample_mean: torch.Tensor,
         noise_std_dev: torch.Tensor,
     ) -> None:
+        batch_size = variance_noise.shape[0]
         self._rollout_local_variance_noises.append(variance_noise)
         self._rollout_local_prev_sample_means.append(prev_sample_mean)
-        self._rollout_local_noise_std_devs.append(noise_std_dev)
+        self._rollout_local_noise_std_devs.append(noise_std_dev.expand((batch_size, 1)))
 
     @require_rollout_enabled_decorator
     def consume_local_rollout_debug_tensors(
