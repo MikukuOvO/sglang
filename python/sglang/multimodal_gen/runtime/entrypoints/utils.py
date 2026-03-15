@@ -112,6 +112,7 @@ class GenerationResult:
     trajectory_variance_noises: Any = None
     trajectory_prev_sample_means: Any = None
     trajectory_noise_std_devs: Any = None
+    trajectory_model_outputs: Any = None
     trajectory_decoded: Any = None
     prompt_index: int = 0
     output_file_path: str | None = None

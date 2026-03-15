@@ -246,6 +246,9 @@ class GPUWorker:
                     trajectory_noise_std_devs=getattr(
                         result, "trajectory_noise_std_devs", None
                     ),
+                    trajectory_model_outputs=getattr(
+                        result, "trajectory_model_outputs", None
+                    ),
                     noise_pred=getattr(result, "noise_pred", None),
                     trajectory_decoded=getattr(result, "trajectory_decoded", None),
                 )

@@ -1,5 +1,6 @@
 # Copied and adapted from: https://github.com/hao-ai-lab/FastVideo
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -21,6 +22,9 @@ from sglang.multimodal_gen.runtime.distributed.parallel_state import (
     get_sp_parallel_rank,
     get_sp_world_size,
 )
+from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
+
+logger = init_logger(__name__)
 
 
 def zimage_preprocess_text(prompt: str):
@@ -60,6 +64,12 @@ class ZImagePipelineConfig(ImagePipelineConfig):
     SEQ_LEN_MULTIPLE: int = 32
     PATCH_SIZE: int = 2
     F_PATCH_SIZE: int = 1
+
+    def _sp_eq_check_enabled(self) -> bool:
+        return os.getenv("SGLANG_ZIMAGE_SP_EQ_CHECK", "").lower() == "true"
+
+    def _sp_eq_assert_enabled(self) -> bool:
+        return os.getenv("SGLANG_ZIMAGE_SP_EQ_ASSERT", "").lower() == "true"
 
     def tokenize_prompt(self, prompts: list[str], tokenizer, tok_kwargs) -> dict:
         # flatten to 1-d list
@@ -121,6 +131,11 @@ class ZImagePipelineConfig(ImagePipelineConfig):
         cap_total = self._ceil_to_multiple(cap_len, self.SEQ_LEN_MULTIPLE * sp_size)
         cap_local = cap_total // sp_size
         cap_start = rank * cap_local
+        # Non-SP baseline for cap padding is to multiple of SEQ_LEN_MULTIPLE.
+        # For SP, we can first pad to that baseline and then ensure divisible by sp_size.
+        cap_total_nonsp = self._ceil_to_multiple(cap_len, self.SEQ_LEN_MULTIPLE)
+        cap_total_expected = self._ceil_to_multiple(cap_total_nonsp, sp_size)
+        cap_local_expected = cap_total_expected // sp_size
 
         plan = {
             "sp_size": sp_size,
@@ -138,7 +153,20 @@ class ZImagePipelineConfig(ImagePipelineConfig):
             "cap_total": cap_total,
             "cap_local": cap_local,
             "cap_start": cap_start,
+            "cap_total_nonsp": cap_total_nonsp,
+            "cap_total_expected": cap_total_expected,
+            "cap_local_expected": cap_local_expected,
         }
+        if self._sp_eq_check_enabled() and cap_total != cap_total_expected:
+            msg = (
+                "ZImage SP cap plan differs from non-SP-aligned expectation: "
+                f"cap_len={cap_len}, sp_size={sp_size}, cap_total={cap_total}, "
+                f"cap_total_expected={cap_total_expected}, cap_local={cap_local}, "
+                f"cap_local_expected={cap_local_expected}, request_id={getattr(batch, 'request_id', None)}"
+            )
+            if self._sp_eq_assert_enabled():
+                raise ValueError(msg)
+            logger.warning(msg)
         batch._zimage_sp_plan = plan
         return plan
 
@@ -262,6 +290,31 @@ class ZImagePipelineConfig(ImagePipelineConfig):
                     [img_pos_ids, pad_ids.repeat(img_pad_len, 1)], dim=0
                 )
             x_freqs_cis = rotary_emb(img_pos_ids)
+
+            if self._sp_eq_check_enabled():
+                cap_ori_len = int(prompt_embeds.size(0))
+                cap_padding_nonsp = (-cap_ori_len) % self.SEQ_LEN_MULTIPLE
+                img_offset_nonsp = cap_ori_len + cap_padding_nonsp + 1
+                img_offset_sp = int(plan["cap_total"]) + 1
+                mismatch = (
+                    int(plan["cap_total"]) != int(plan["cap_total_expected"])
+                    or int(plan["cap_local"]) != int(plan["cap_local_expected"])
+                    or img_offset_sp != img_offset_nonsp
+                )
+                if mismatch:
+                    msg = (
+                        "ZImage SP freqs offset mismatch vs non-SP baseline: "
+                        f"request_id={getattr(batch, 'request_id', None)}, "
+                        f"sp_rank={get_sp_parallel_rank()}, sp_size={plan['sp_size']}, "
+                        f"cap_len={cap_ori_len}, cap_total={plan['cap_total']}, "
+                        f"cap_total_expected={plan['cap_total_expected']}, "
+                        f"cap_local={plan['cap_local']}, cap_local_expected={plan['cap_local_expected']}, "
+                        f"img_offset_sp={img_offset_sp}, img_offset_nonsp={img_offset_nonsp}, "
+                        f"img_tokens_local={img_pos_ids.shape[0]}"
+                    )
+                    if self._sp_eq_assert_enabled():
+                        raise ValueError(msg)
+                    logger.warning(msg)
             return (cap_freqs_cis, x_freqs_cis)
 
         cap_ori_len = prompt_embeds.size(0)
