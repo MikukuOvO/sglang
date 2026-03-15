@@ -235,6 +235,7 @@ class DecodingStage(PipelineStage):
             trajectory_variance_noises=batch.trajectory_variance_noises,
             trajectory_prev_sample_means=batch.trajectory_prev_sample_means,
             trajectory_noise_std_devs=batch.trajectory_noise_std_devs,
+            trajectory_model_outputs=batch.trajectory_model_outputs,
             trajectory_decoded=trajectory_decoded,
             metrics=batch.metrics,
         )

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Compare SDE/CPS rollout trajectory debug (prev_sample_mean, noise_std_dev, variance_noise) across parallel configs.
+"""Compare SDE/CPS rollout trajectory debug
+(prev_sample_mean, noise_std_dev, variance_noise, model_output) across parallel configs.
 
 All tensors are converted to float32 before numpy (bf16-safe). Reports per-step and overall
 max absolute difference and allclose for each quantity.
@@ -142,8 +143,8 @@ def run_one(
     cfg_guidance_scale: float,
     log_prob_no_const: bool,
     negative_prompt: str | None = None,
-) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]] | None:
-    """Run one generation with rollout; return (variance_noises, prev_sample_means, noise_std_devs) as numpy lists or None."""
+) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]] | None:
+    """Run one generation with rollout; return debug trajectories as numpy lists or None."""
     width, height = parse_size(size)
     kwargs: dict[str, Any] = {
         "prompt": prompt,
@@ -173,15 +174,18 @@ def run_one(
     v = getattr(result, "trajectory_variance_noises", None)
     p = getattr(result, "trajectory_prev_sample_means", None)
     s = getattr(result, "trajectory_noise_std_devs", None)
+    m = getattr(result, "trajectory_model_outputs", None)
     v_steps = to_step_list(v)
     p_steps = to_step_list(p)
     s_steps = to_step_list(s)
-    if not v_steps or not p_steps or not s_steps:
+    m_steps = to_step_list(m)
+    if not v_steps or not p_steps or not s_steps or not m_steps:
         return None
     return (
         [to_numpy_bf16_safe(t) for t in v_steps],
         [to_numpy_bf16_safe(t) for t in p_steps],
         [to_numpy_bf16_safe(t) for t in s_steps],
+        [to_numpy_bf16_safe(t) for t in m_steps],
     )
 
 
@@ -189,9 +193,11 @@ def compare_lists(
     ref_v: list[np.ndarray],
     ref_p: list[np.ndarray],
     ref_s: list[np.ndarray],
+    ref_m: list[np.ndarray],
     cur_v: list[np.ndarray],
     cur_p: list[np.ndarray],
     cur_s: list[np.ndarray],
+    cur_m: list[np.ndarray],
 ) -> dict[str, Any]:
     """Compare current (cur_*) to reference (ref_*). Return metrics for each quantity."""
     def metrics(ref_list: list[np.ndarray], cur_list: list[np.ndarray], name: str) -> dict[str, Any]:
@@ -228,6 +234,7 @@ def compare_lists(
     out.update(metrics(ref_v, cur_v, "variance_noise"))
     out.update(metrics(ref_p, cur_p, "prev_sample_mean"))
     out.update(metrics(ref_s, cur_s, "noise_std_dev"))
+    out.update(metrics(ref_m, cur_m, "model_output"))
     return out
 
 
@@ -261,7 +268,7 @@ def format_array_preview(arr: np.ndarray) -> str:
 def write_tensor_dump_file(
     *,
     out_root: Path,
-    data: dict[str, dict[str, tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]]],
+    data: dict[str, dict[str, tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]]],
     effective_gpus: int,
     args: argparse.Namespace,
     failures: list[str],
@@ -288,10 +295,10 @@ def write_tensor_dump_file(
             lines.append("")
             continue
 
-        for config_name, (v_steps, p_steps, s_steps) in data[mode].items():
+        for config_name, (v_steps, p_steps, s_steps, m_steps) in data[mode].items():
             lines.append(f"### Config: {config_name}")
             lines.append("")
-            max_steps = max(len(v_steps), len(p_steps), len(s_steps))
+            max_steps = max(len(v_steps), len(p_steps), len(s_steps), len(m_steps))
             for step_idx in range(max_steps):
                 lines.append(f"Step {step_idx}:")
                 lines.append("")
@@ -322,6 +329,15 @@ def write_tensor_dump_file(
                 else:
                     lines.append("- noise_std_dev: <missing>")
                     lines.append("")
+
+                if step_idx < len(m_steps):
+                    m = m_steps[step_idx]
+                    lines.append(f"- model_output shape={m.shape}")
+                    lines.append(format_array_preview(m))
+                    lines.append("")
+                else:
+                    lines.append("- model_output: <missing>")
+                    lines.append("")
             lines.append("")
 
     dump_path = out_root / "trajectory_debug_tensors.txt"
@@ -331,7 +347,7 @@ def write_tensor_dump_file(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare SDE/CPS trajectory debug (prev_sample_mean, noise_std_dev, variance_noise) across parallel configs."
+        description="Compare SDE/CPS trajectory debug (prev_sample_mean, noise_std_dev, variance_noise, model_output) across parallel configs."
     )
     parser.add_argument("--model", type=str, default="Tongyi-MAI/Z-Image-Turbo", help="Model path.")
     parser.add_argument("--prompt", type=str, default="A cat", help="Prompt.")
@@ -365,8 +381,8 @@ def main() -> None:
     effective_gpus = visible if args.parallel_gpu_count is None else min(args.parallel_gpu_count, visible)
     configs = default_parallel_configs(effective_gpus)
 
-    # (mode -> config_name -> (v_list, p_list, s_list))
-    data: dict[str, dict[str, tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]]] = {
+    # (mode -> config_name -> (v_list, p_list, s_list, m_list))
+    data: dict[str, dict[str, tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]]] = {
         "sde": {},
         "cps": {},
     }
@@ -419,17 +435,17 @@ def main() -> None:
         if not configs_with_data:
             continue
         ref_name = configs_with_data[0]
-        ref_v, ref_p, ref_s = data[mode][ref_name]
+        ref_v, ref_p, ref_s, ref_m = data[mode][ref_name]
         for cname in configs_with_data:
-            cur_v, cur_p, cur_s = data[mode][cname]
+            cur_v, cur_p, cur_s, cur_m = data[mode][cname]
             row = {"config": cname}
             row.update(
-                compare_lists(ref_v, ref_p, ref_s, cur_v, cur_p, cur_s)
+                compare_lists(ref_v, ref_p, ref_s, ref_m, cur_v, cur_p, cur_s, cur_m)
             )
             report[mode].append(row)
 
     # Print and write report
-    print("=== Rollout trajectory debug (prev_sample_mean, noise_std_dev, variance_noise) ===\n")
+    print("=== Rollout trajectory debug (prev_sample_mean, noise_std_dev, variance_noise, model_output) ===\n")
     print(f"Effective GPUs: {effective_gpus}")
     if failures:
         print("Failures:")
@@ -453,10 +469,10 @@ def main() -> None:
             continue
         lines.append(f"## Mode: {mode}")
         lines.append("")
-        lines.append("| config | variance_noise shape | variance_noise max_abs_diff | variance_noise all_match | prev_sample_mean shape | prev_sample_mean max_abs_diff | prev_sample_mean all_match | noise_std_dev shape | noise_std_dev max_abs_diff | noise_std_dev all_match |")
-        lines.append("|--------|----------------------|-----------------------------|--------------------------|------------------------|-------------------------------|---------------------------|---------------------|---------------------------|-------------------------|")
+        lines.append("| config | variance_noise shape | variance_noise max_abs_diff | variance_noise all_match | prev_sample_mean shape | prev_sample_mean max_abs_diff | prev_sample_mean all_match | noise_std_dev shape | noise_std_dev max_abs_diff | noise_std_dev all_match | model_output shape | model_output max_abs_diff | model_output all_match |")
+        lines.append("|--------|----------------------|-----------------------------|--------------------------|------------------------|-------------------------------|---------------------------|---------------------|---------------------------|-------------------------|--------------------|---------------------------|------------------------|")
         for row in report[mode]:
-            cur_v, cur_p, cur_s = data[mode][row["config"]]
+            cur_v, cur_p, cur_s, cur_m = data[mode][row["config"]]
             v_shape = summarize_shapes(cur_v)
             v_diff = row.get("variance_noise_max_abs_diff", "")
             v_ok = row.get("variance_noise_all_steps_match", "")
@@ -466,8 +482,11 @@ def main() -> None:
             s_shape = summarize_shapes(cur_s)
             s_diff = row.get("noise_std_dev_max_abs_diff", "")
             s_ok = row.get("noise_std_dev_all_steps_match", "")
+            m_shape = summarize_shapes(cur_m)
+            m_diff = row.get("model_output_max_abs_diff", "")
+            m_ok = row.get("model_output_all_steps_match", "")
             lines.append(
-                f"| {row['config']} | {v_shape} | {v_diff} | {v_ok} | {p_shape} | {p_diff} | {p_ok} | {s_shape} | {s_diff} | {s_ok} |"
+                f"| {row['config']} | {v_shape} | {v_diff} | {v_ok} | {p_shape} | {p_diff} | {p_ok} | {s_shape} | {s_diff} | {s_ok} | {m_shape} | {m_diff} | {m_ok} |"
             )
         lines.append("")
     report_path = out_root / "trajectory_debug_report.md"
