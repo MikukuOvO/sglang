@@ -152,8 +152,9 @@ class SchedulerRLMixin(SchedulerRLDebugMixin):
             prev_sample_mean = sample * (1 + std_dev_t**2 / (2 * current_sigma) * dt) \
                                + model_output * (1 + std_dev_t**2 * (1 - current_sigma) / (2 * current_sigma)) * dt
 
-            prev_sample = prev_sample_mean + noise_std_dev * variance_noise
-            log_prob_no_const = -((prev_sample - prev_sample_mean) ** 2)
+            weighted_variance_noise = variance_noise * noise_std_dev
+            prev_sample = prev_sample_mean + weighted_variance_noise
+            log_prob_no_const = -(weighted_variance_noise ** 2)
 
         elif self._rollout_param_sde_type == "cps":
             std_dev_t = next_sigma * math.sin(self._rollout_param_noise_level * math.pi / 2) # sigma_t in paper
@@ -162,8 +163,9 @@ class SchedulerRLMixin(SchedulerRLDebugMixin):
             noise_estimate = sample + model_output * (1 - current_sigma) # predicted x_1 in paper
             prev_sample_mean = pred_original_sample * (1 - next_sigma) + noise_estimate * torch.sqrt(next_sigma**2 - std_dev_t**2)
 
-            prev_sample = prev_sample_mean + noise_std_dev * variance_noise
-            log_prob_no_const = -((prev_sample - prev_sample_mean) ** 2)
+            weighted_variance_noise = variance_noise * noise_std_dev
+            prev_sample = prev_sample_mean + weighted_variance_noise
+            log_prob_no_const = -(weighted_variance_noise ** 2)
 
         else:
             raise ValueError(f"Unsupported sde_type: {self._rollout_param_sde_type}")
@@ -175,6 +177,7 @@ class SchedulerRLMixin(SchedulerRLDebugMixin):
             float(math.prod(log_prob_no_const.shape[1:])),
         )
 
+        # Assume pipeline_config.shard_latents_for_sp use zero padding
         if self._rollout_param_log_prob_no_const:
             log_prob_local_sum = log_prob_no_const.sum(dim=reduce_dims)
         else:
