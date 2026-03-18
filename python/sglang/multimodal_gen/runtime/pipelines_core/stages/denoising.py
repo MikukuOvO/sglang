@@ -60,7 +60,7 @@ from sglang.multimodal_gen.runtime.loader.component_loaders.transformer_loader i
     TransformerLoader,
 )
 from sglang.multimodal_gen.runtime.managers.forward_context import set_forward_context
-from sglang.multimodal_gen.runtime.post_training import SchedulerRLMixin
+from sglang.multimodal_gen.runtime.post_training.scheduler_rl_mixin import SchedulerRLMixin
 from sglang.multimodal_gen.runtime.post_training.rl_dataclasses import (
     RolloutTrajectoryData,
 )
