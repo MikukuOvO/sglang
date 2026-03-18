@@ -155,6 +155,7 @@ def run_one(
         "rollout_sde_type": mode,
         "rollout_noise_level": noise_level,
         "rollout_log_prob_no_const": log_prob_no_const,
+        "rollout_debug_mode": True,
         "return_file_paths_only": True,
     }
     if num_inference_steps is not None:
@@ -171,10 +172,11 @@ def run_one(
         result = result[0] if result else None
     if result is None:
         return None
-    v = getattr(result, "trajectory_variance_noises", None)
-    p = getattr(result, "trajectory_prev_sample_means", None)
-    s = getattr(result, "trajectory_noise_std_devs", None)
-    m = getattr(result, "trajectory_model_outputs", None)
+    rollout_trajectory_data = getattr(result, "rollout_trajectory_data", None)
+    v = getattr(rollout_trajectory_data, "rollout_variance_noises", None)
+    p = getattr(rollout_trajectory_data, "rollout_prev_sample_means", None)
+    s = getattr(rollout_trajectory_data, "rollout_noise_std_devs", None)
+    m = getattr(rollout_trajectory_data, "rollout_model_outputs", None)
     v_steps = to_step_list(v)
     p_steps = to_step_list(p)
     s_steps = to_step_list(s)

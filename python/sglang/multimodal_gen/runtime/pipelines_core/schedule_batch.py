@@ -22,6 +22,13 @@ import PIL.Image
 import torch
 
 from sglang.multimodal_gen.configs.sample.sampling_params import SamplingParams
+from sglang.multimodal_gen.configs.sample.teacache import (
+    TeaCacheParams,
+    WanTeaCacheParams,
+)
+from sglang.multimodal_gen.runtime.post_training.rl_dataclasses import (
+    RolloutTrajectoryData,
+)
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.logging_utils import (
     _sanitize_for_logging,
@@ -133,11 +140,7 @@ class Req:
 
     trajectory_timesteps: torch.Tensor | None = None
     trajectory_latents: torch.Tensor | None = None
-    trajectory_log_probs: torch.Tensor | None = None
-    trajectory_variance_noises: torch.Tensor | None = None
-    trajectory_prev_sample_means: torch.Tensor | None = None
-    trajectory_noise_std_devs: torch.Tensor | None = None
-    trajectory_model_outputs: torch.Tensor | None = None
+    rollout_trajectory_data: RolloutTrajectoryData | None = None
     trajectory_audio_latents: torch.Tensor | None = None
 
     # Extra parameters that might be needed by specific pipeline implementations
@@ -335,11 +338,7 @@ class OutputBatch:
     audio_sample_rate: int | None = None
     trajectory_timesteps: torch.Tensor | None = None
     trajectory_latents: torch.Tensor | None = None
-    trajectory_log_probs: torch.Tensor | None = None
-    trajectory_variance_noises: torch.Tensor | None = None
-    trajectory_prev_sample_means: torch.Tensor | None = None
-    trajectory_noise_std_devs: torch.Tensor | None = None
-    trajectory_model_outputs: torch.Tensor | None = None
+    rollout_trajectory_data: RolloutTrajectoryData | None = None
     trajectory_decoded: list[torch.Tensor] | None = None
     error: str | None = None
     output_file_paths: list[str] | None = None
