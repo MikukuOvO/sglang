@@ -233,19 +233,7 @@ class GPUWorker:
                     metrics=result.metrics,
                     trajectory_timesteps=getattr(result, "trajectory_timesteps", None),
                     trajectory_latents=getattr(result, "trajectory_latents", None),
-                    trajectory_log_probs=getattr(result, "trajectory_log_probs", None),
-                    trajectory_variance_noises=getattr(
-                        result, "trajectory_variance_noises", None
-                    ),
-                    trajectory_prev_sample_means=getattr(
-                        result, "trajectory_prev_sample_means", None
-                    ),
-                    trajectory_noise_std_devs=getattr(
-                        result, "trajectory_noise_std_devs", None
-                    ),
-                    trajectory_model_outputs=getattr(
-                        result, "trajectory_model_outputs", None
-                    ),
+                    rollout_trajectory_data=getattr(result, "rollout_trajectory_data", None),
                     noise_pred=getattr(result, "noise_pred", None),
                     trajectory_decoded=getattr(result, "trajectory_decoded", None),
                 )

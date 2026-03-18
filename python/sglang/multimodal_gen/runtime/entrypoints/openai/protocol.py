@@ -21,7 +21,6 @@ class ImageResponse(BaseModel):
     data: List[ImageResponseData]
     peak_memory_mb: Optional[float] = None
     inference_time_s: Optional[float] = None
-    trajectory_log_probs: Optional[Any] = None
 
 
 class ImageGenerationsRequest(BaseModel):
@@ -51,6 +50,7 @@ class ImageGenerationsRequest(BaseModel):
     rollout_sde_type: Optional[str] = "sde"
     rollout_noise_level: Optional[float] = 0.7
     rollout_log_prob_no_const: Optional[bool] = False
+    rollout_debug_mode: Optional[bool] = False
     diffusers_kwargs: Optional[Dict[str, Any]] = None  # kwargs for diffusers backend
 
 
@@ -73,7 +73,6 @@ class VideoResponse(BaseModel):
     file_path: Optional[str] = None
     peak_memory_mb: Optional[float] = None
     inference_time_s: Optional[float] = None
-    trajectory_log_probs: Optional[Any] = None
 
 
 class VideoGenerationsRequest(BaseModel):
@@ -108,6 +107,7 @@ class VideoGenerationsRequest(BaseModel):
     rollout_sde_type: Optional[str] = "sde"
     rollout_noise_level: Optional[float] = 0.7
     rollout_log_prob_no_const: Optional[bool] = False
+    rollout_debug_mode: Optional[bool] = False
     diffusers_kwargs: Optional[Dict[str, Any]] = None  # kwargs for diffusers backend
 
 

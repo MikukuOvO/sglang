@@ -331,6 +331,9 @@ def add_common_data_to_response(
     if result.metrics and result.metrics.total_duration_s > 0:
         response["inference_time_s"] = result.metrics.total_duration_s
 
+    if result.rollout_trajectory_data is not None:
+        response["rollout_trajectory_data"] = result.rollout_trajectory_data
+
     response["id"] = request_id
 
     return response

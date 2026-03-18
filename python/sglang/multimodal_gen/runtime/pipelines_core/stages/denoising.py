@@ -61,6 +61,10 @@ from sglang.multimodal_gen.runtime.loader.component_loaders.transformer_loader i
     TransformerLoader,
 )
 from sglang.multimodal_gen.runtime.managers.forward_context import set_forward_context
+from sglang.multimodal_gen.runtime.post_training import SchedulerRLMixin
+from sglang.multimodal_gen.runtime.post_training.rl_dataclasses import (
+    RolloutTrajectoryData,
+)
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
 from sglang.multimodal_gen.runtime.pipelines_core.stages.base import (
     PipelineStage,
@@ -82,7 +86,6 @@ from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 from sglang.multimodal_gen.runtime.utils.perf_logger import StageProfiler
 from sglang.multimodal_gen.runtime.utils.profiler import SGLDiffusionProfiler
 from sglang.multimodal_gen.utils import dict_to_3d_list, masks_like
-from sglang.multimodal_gen.runtime.post_training import SchedulerRLMixin
 
 logger = init_logger(__name__)
 
@@ -158,13 +161,18 @@ class DenoisingStage(PipelineStage):
             return
 
         if batch.rollout:
-            batch.trajectory_log_probs = self.scheduler.collect_rollout_log_probs(batch)
-            (
-                batch.trajectory_variance_noises,
-                batch.trajectory_prev_sample_means,
-                batch.trajectory_noise_std_devs,
-                batch.trajectory_model_outputs,
-            ) = self.scheduler.collect_rollout_debug_tensors(batch)
+            if batch.rollout_trajectory_data is None:
+                batch.rollout_trajectory_data = RolloutTrajectoryData()
+            batch.rollout_trajectory_data.rollout_log_probs = self.scheduler.collect_rollout_log_probs(
+                batch
+            )
+            if getattr(batch, "rollout_debug_mode", False):
+                (
+                    batch.rollout_trajectory_data.rollout_variance_noises,
+                    batch.rollout_trajectory_data.rollout_prev_sample_means,
+                    batch.rollout_trajectory_data.rollout_noise_std_devs,
+                    batch.rollout_trajectory_data.rollout_model_outputs,
+                ) = self.scheduler.collect_rollout_debug_tensors(batch)
             self.scheduler.release_rollout_resources()
 
     def _maybe_enable_torch_compile(self, module: object) -> None:

@@ -163,6 +163,7 @@ class SamplingParams:
     rollout_sde_type: str = "sde"
     rollout_noise_level: float = 0.7
     rollout_log_prob_no_const: bool = False  # exclude constants in rollout logprob
+    rollout_debug_mode: bool = False  # return rollout debug tensors (intermediate states)
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
     # if True, disallow user params to override subclass-defined protected fields
@@ -839,6 +840,12 @@ class SamplingParams:
             action=StoreBoolean,
             default=SamplingParams.rollout_log_prob_no_const,
             help="If true, return rollout log-prob without constant terms.",
+        )
+        parser.add_argument(
+            "--rollout-debug-mode",
+            action=StoreBoolean,
+            default=SamplingParams.rollout_debug_mode,
+            help="If true, return rollout debug tensors (variance noise, mean, std, model output).",
         )
         parser.add_argument(
             "--return-trajectory-decoded",

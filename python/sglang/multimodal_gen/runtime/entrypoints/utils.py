@@ -108,11 +108,7 @@ class GenerationResult:
     metrics: dict = field(default_factory=dict)
     trajectory_latents: Any = None
     trajectory_timesteps: Any = None
-    trajectory_log_probs: Any = None
-    trajectory_variance_noises: Any = None
-    trajectory_prev_sample_means: Any = None
-    trajectory_noise_std_devs: Any = None
-    trajectory_model_outputs: Any = None
+    rollout_trajectory_data: Any = None
     trajectory_decoded: Any = None
     prompt_index: int = 0
     output_file_path: str | None = None
