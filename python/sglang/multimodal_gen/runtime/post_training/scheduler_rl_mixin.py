@@ -169,6 +169,8 @@ class SchedulerRLMixin(SchedulerRLDebugMixin):
 
         elif self._rollout_param_sde_type == "ode":
             prev_sample = sample + dt * model_output
+            prev_sample_mean = prev_sample
+            noise_std_dev = 0
             log_prob_no_const = 0
             assert self._rollout_param_log_prob_no_const, "p_ode is always 0, true log_prob is meaningless, set rollout_log_prob_no_const to True to enable log_prob computation"
 
