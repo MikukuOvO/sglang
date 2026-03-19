@@ -167,7 +167,12 @@ class SchedulerRLMixin(SchedulerRLDebugMixin):
             prev_sample = prev_sample_mean + weighted_variance_noise
             log_prob_no_const = -(weighted_variance_noise ** 2)
 
-        else:
+        elif self._rollout_param_sde_type == "ode":
+            prev_sample = sample + dt * model_output
+            log_prob_no_const = 0
+            assert self._rollout_param_log_prob_no_const, "p_ode is always 0, true log_prob is meaningless, set rollout_log_prob_no_const to True to enable log_prob computation"
+
+        else :
             raise ValueError(f"Unsupported sde_type: {self._rollout_param_sde_type}")
 
         # Calculate local log_prob sum and local element count (for cross-SP mean).
