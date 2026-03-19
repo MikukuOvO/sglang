@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Compare SDE/CPS rollout trajectory debug
+"""Compare SDE/CPS/ODE rollout trajectory debug
 (prev_sample_mean, noise_std_dev, variance_noise, model_output) across parallel configs.
 
 All tensors are converted to float32 before numpy (bf16-safe). Reports per-step and overall
@@ -39,6 +39,9 @@ class ParallelConfig:
     tp_size: int
     sp_degree: int
     enable_cfg_parallel: bool
+
+
+ROLLOUT_MODES: tuple[str, ...] = ("sde", "cps", "ode")
 
 
 def parse_size(size: str) -> tuple[int, int]:
@@ -380,7 +383,7 @@ def write_tensor_dump_file(
     for model in models:
         lines.append(f"## Model: {model}")
         lines.append("")
-        for mode in ("sde", "cps"):
+        for mode in ROLLOUT_MODES:
             lines.append(f"### Mode: {mode}")
             lines.append("")
             mode_data = data.get(model, {}).get(mode, {})
@@ -442,7 +445,7 @@ def write_tensor_dump_file(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare SDE/CPS trajectory debug (prev_sample_mean, noise_std_dev, variance_noise, model_output) across parallel configs."
+        description="Compare SDE/CPS/ODE trajectory debug (prev_sample_mean, noise_std_dev, variance_noise, model_output) across parallel configs."
     )
     parser.add_argument(
         "--models",
@@ -509,7 +512,7 @@ def main() -> None:
     # (model -> mode -> config_name -> (v_list, p_list, s_list, m_list))
     data: dict[str, dict[str, dict[str, tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]]]] = {}
     for model in model_list:
-        data[model] = {"sde": {}, "cps": {}}
+        data[model] = {mode: {} for mode in ROLLOUT_MODES}
     failures: list[str] = []
 
     for model in model_list:
@@ -525,7 +528,7 @@ def main() -> None:
                 trust_remote_code=args.trust_remote_code,
                 output_path=out_root,
             )
-            for mode in ("sde", "cps"):
+            for mode in ROLLOUT_MODES:
                 tri = run_one(
                     gen_ref,
                     prompt=args.prompt,
@@ -566,7 +569,7 @@ def main() -> None:
                 gs = args.guidance_scale
                 if cfg.enable_cfg_parallel and (gs is None or gs <= 1.0):
                     gs = args.cfg_guidance_scale
-                for mode in ("sde", "cps"):
+                for mode in ROLLOUT_MODES:
                     tri = run_one(
                         gen,
                         prompt=args.prompt,
@@ -593,10 +596,10 @@ def main() -> None:
 
     # Build report: for each model/mode, all configs compare to single-GPU ref.
     report: dict[str, dict[str, list[dict[str, Any]]]] = {
-        m: {"sde": [], "cps": []} for m in model_list
+        m: {mode: [] for mode in ROLLOUT_MODES} for m in model_list
     }
     for model in model_list:
-        for mode in ("sde", "cps"):
+        for mode in ROLLOUT_MODES:
             mode_data = data[model][mode]
             if ref_config.name not in mode_data:
                 failures.append(f"{model}:{mode}: missing single-GPU reference")
@@ -611,7 +614,7 @@ def main() -> None:
                 report[model][mode].append(row)
 
     # Print and write report
-    print("=== Rollout trajectory debug (prev_sample_mean, noise_std_dev, variance_noise, model_output) ===\n")
+    print("=== Rollout trajectory debug (SDE/CPS/ODE; prev_sample_mean, noise_std_dev, variance_noise, model_output) ===\n")
     print(f"Effective GPUs: {effective_gpus}")
     print(f"Reference config for all comparisons: {ref_config.name}")
     if failures:
@@ -639,7 +642,7 @@ def main() -> None:
     for model in model_list:
         lines.append(f"## Model: {model}")
         lines.append("")
-        for mode in ("sde", "cps"):
+        for mode in ROLLOUT_MODES:
             if not report[model][mode]:
                 continue
             lines.append(f"### Mode: {mode}")
