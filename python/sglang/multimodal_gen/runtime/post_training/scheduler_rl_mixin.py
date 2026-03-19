@@ -139,11 +139,9 @@ class SchedulerRLMixin(SchedulerRLDebugMixin):
         generator: torch.Generator,
     ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """flow sde sampling methods, reference: FlowGRPO"""
-
-        variance_noise = self._rollout_variance_noise(model_output, generator)
-
         dt = next_sigma - current_sigma
         if self._rollout_param_sde_type == "sde":
+            variance_noise = self._rollout_variance_noise(model_output, generator)
             std_dev_t = torch.sqrt(
                 current_sigma / 
                 (1 - torch.where(torch.isclose(current_sigma, current_sigma.new_tensor(1.0)),
@@ -157,6 +155,7 @@ class SchedulerRLMixin(SchedulerRLDebugMixin):
             log_prob_no_const = -(weighted_variance_noise ** 2)
 
         elif self._rollout_param_sde_type == "cps":
+            variance_noise = self._rollout_variance_noise(model_output, generator)
             std_dev_t = next_sigma * math.sin(self._rollout_param_noise_level * math.pi / 2) # sigma_t in paper
             noise_std_dev = std_dev_t # the std before noise in paper
             pred_original_sample = sample - current_sigma * model_output # predicted x_0 in paper
@@ -170,8 +169,10 @@ class SchedulerRLMixin(SchedulerRLDebugMixin):
         elif self._rollout_param_sde_type == "ode":
             prev_sample = sample + dt * model_output
             prev_sample_mean = prev_sample
-            noise_std_dev = 0
-            log_prob_no_const = 0
+            # ODE path is deterministic: keep rollout debug tensors shape-consistent.
+            variance_noise = torch.zeros_like(model_output)
+            noise_std_dev = torch.zeros((), device=model_output.device, dtype=model_output.dtype)
+            log_prob_no_const = torch.zeros_like(model_output)
             assert self._rollout_param_log_prob_no_const, "p_ode is always 0, true log_prob is meaningless, set rollout_log_prob_no_const to True to enable log_prob computation"
 
         else :
