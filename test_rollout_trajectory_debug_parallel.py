@@ -202,14 +202,69 @@ def compare_lists(
     cur_m: list[np.ndarray],
 ) -> dict[str, Any]:
     """Compare current (cur_*) to reference (ref_*). Return metrics for each quantity."""
+
+    def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+        a64 = a.astype(np.float64).reshape(-1)
+        b64 = b.astype(np.float64).reshape(-1)
+        denom = np.linalg.norm(a64) * np.linalg.norm(b64)
+        if denom == 0.0:
+            # Both zeros are identical directionally; one-sided zero should be worst-case.
+            return 1.0 if np.linalg.norm(a64) == 0.0 and np.linalg.norm(b64) == 0.0 else 0.0
+        cos = float(np.dot(a64, b64) / denom)
+        # Guard against tiny floating-point overshoot.
+        return float(np.clip(cos, -1.0, 1.0))
+
     def metrics(ref_list: list[np.ndarray], cur_list: list[np.ndarray], name: str) -> dict[str, Any]:
+        def aggregate_metric_dict(
+            ref_steps: list[np.ndarray], cur_steps: list[np.ndarray], prefix: str = ""
+        ) -> dict[str, Any]:
+            diffs = [
+                np.abs(cur_steps[i].astype(np.float64) - ref_steps[i].astype(np.float64))
+                for i in range(len(ref_steps))
+            ]
+            max_abs = float(max(np.max(d) for d in diffs)) if diffs else 0.0
+            per_step_mse = [
+                float(
+                    np.mean(
+                        (cur_steps[i].astype(np.float64) - ref_steps[i].astype(np.float64))
+                        ** 2
+                    )
+                )
+                for i in range(len(ref_steps))
+            ]
+            mean_mse = float(np.mean(per_step_mse)) if per_step_mse else 0.0
+            per_step_cos = [
+                cosine_similarity(cur_steps[i], ref_steps[i]) for i in range(len(ref_steps))
+            ]
+            min_cos = float(np.min(per_step_cos)) if per_step_cos else 1.0
+            mean_cos = float(np.mean(per_step_cos)) if per_step_cos else 1.0
+            all_match = all(
+                np.allclose(cur_steps[i], ref_steps[i], rtol=1e-5, atol=1e-5)
+                for i in range(len(ref_steps))
+            )
+            return {
+                f"{name}_{prefix}max_abs_diff": max_abs,
+                f"{name}_{prefix}mean_mse": mean_mse,
+                f"{name}_{prefix}min_cosine_similarity": min_cos,
+                f"{name}_{prefix}mean_cosine_similarity": mean_cos,
+                f"{name}_{prefix}all_steps_match": all_match,
+            }
+
         same_len = len(cur_list) == len(ref_list)
         if not same_len:
             return {
                 f"{name}_same_len": False,
                 f"{name}_same_shapes": False,
                 f"{name}_max_abs_diff": float("inf"),
+                f"{name}_mean_mse": float("inf"),
+                f"{name}_min_cosine_similarity": -1.0,
+                f"{name}_mean_cosine_similarity": -1.0,
                 f"{name}_all_steps_match": False,
+                f"{name}_first_step_max_abs_diff": float("inf"),
+                f"{name}_first_step_mean_mse": float("inf"),
+                f"{name}_first_step_min_cosine_similarity": -1.0,
+                f"{name}_first_step_mean_cosine_similarity": -1.0,
+                f"{name}_first_step_all_steps_match": False,
             }
         same_shapes = all(c.shape == r.shape for c, r in zip(cur_list, ref_list))
         if not same_shapes:
@@ -217,20 +272,34 @@ def compare_lists(
                 f"{name}_same_len": True,
                 f"{name}_same_shapes": False,
                 f"{name}_max_abs_diff": float("inf"),
+                f"{name}_mean_mse": float("inf"),
+                f"{name}_min_cosine_similarity": -1.0,
+                f"{name}_mean_cosine_similarity": -1.0,
                 f"{name}_all_steps_match": False,
+                f"{name}_first_step_max_abs_diff": float("inf"),
+                f"{name}_first_step_mean_mse": float("inf"),
+                f"{name}_first_step_min_cosine_similarity": -1.0,
+                f"{name}_first_step_mean_cosine_similarity": -1.0,
+                f"{name}_first_step_all_steps_match": False,
             }
-        diffs = [np.abs(cur_list[i].astype(np.float64) - ref_list[i].astype(np.float64)) for i in range(len(ref_list))]
-        max_abs = float(max(np.max(d) for d in diffs)) if diffs else 0.0
-        all_match = all(
-            np.allclose(cur_list[i], ref_list[i], rtol=1e-5, atol=1e-5)
-            for i in range(len(ref_list))
-        )
-        return {
+        out = {
             f"{name}_same_len": True,
             f"{name}_same_shapes": True,
-            f"{name}_max_abs_diff": max_abs,
-            f"{name}_all_steps_match": all_match,
         }
+        out.update(aggregate_metric_dict(ref_list, cur_list))
+        if len(ref_list) > 0:
+            out.update(aggregate_metric_dict(ref_list[:1], cur_list[:1], prefix="first_step_"))
+        else:
+            out.update(
+                {
+                    f"{name}_first_step_max_abs_diff": None,
+                    f"{name}_first_step_mean_mse": None,
+                    f"{name}_first_step_min_cosine_similarity": None,
+                    f"{name}_first_step_mean_cosine_similarity": None,
+                    f"{name}_first_step_all_steps_match": None,
+                }
+            )
+        return out
 
     out: dict[str, Any] = {}
     out.update(metrics(ref_v, cur_v, "variance_noise"))
@@ -267,12 +336,27 @@ def format_array_preview(arr: np.ndarray) -> str:
     )
 
 
+def format_metric(v: Any, digits: int = 8) -> str:
+    if v is None:
+        return "-"
+    if isinstance(v, bool):
+        return str(v)
+    if isinstance(v, (int, np.integer)):
+        return str(v)
+    if isinstance(v, (float, np.floating)):
+        if np.isfinite(v):
+            return f"{float(v):.{digits}g}"
+        return str(v)
+    return str(v)
+
+
 def write_tensor_dump_file(
     *,
     out_root: Path,
-    data: dict[str, dict[str, tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]]],
+    data: dict[str, dict[str, dict[str, tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]]]],
     effective_gpus: int,
     args: argparse.Namespace,
+    models: list[str],
     failures: list[str],
 ) -> Path:
     """Write all compared intermediate tensors in plain text."""
@@ -283,64 +367,73 @@ def write_tensor_dump_file(
         f"Prompt: {args.prompt!r}, seed={args.seed}, noise_level={args.noise_level}",
         "",
     ]
+    lines.append("Models:")
+    for m in models:
+        lines.append(f"- {m}")
+    lines.append("")
     if failures:
         lines.append("## Failures")
         for f in failures:
             lines.append(f"- {f}")
         lines.append("")
 
-    for mode in ("sde", "cps"):
-        lines.append(f"## Mode: {mode}")
+    for model in models:
+        lines.append(f"## Model: {model}")
         lines.append("")
-        if not data[mode]:
-            lines.append("(no data)")
+        for mode in ("sde", "cps"):
+            lines.append(f"### Mode: {mode}")
             lines.append("")
-            continue
-
-        for config_name, (v_steps, p_steps, s_steps, m_steps) in data[mode].items():
-            lines.append(f"### Config: {config_name}")
-            lines.append("")
-            max_steps = max(len(v_steps), len(p_steps), len(s_steps), len(m_steps))
-            for step_idx in range(max_steps):
-                lines.append(f"Step {step_idx}:")
+            mode_data = data.get(model, {}).get(mode, {})
+            if not mode_data:
+                lines.append("(no data)")
                 lines.append("")
+                continue
 
-                if step_idx < len(v_steps):
-                    v = v_steps[step_idx]
-                    lines.append(f"- variance_noise shape={v.shape}")
-                    lines.append(format_array_preview(v))
-                    lines.append("")
-                else:
-                    lines.append("- variance_noise: <missing>")
-                    lines.append("")
-
-                if step_idx < len(p_steps):
-                    p = p_steps[step_idx]
-                    lines.append(f"- prev_sample_mean shape={p.shape}")
-                    lines.append(format_array_preview(p))
-                    lines.append("")
-                else:
-                    lines.append("- prev_sample_mean: <missing>")
+            for config_name, (v_steps, p_steps, s_steps, m_steps) in mode_data.items():
+                lines.append(f"#### Config: {config_name}")
+                lines.append("")
+                max_steps = max(len(v_steps), len(p_steps), len(s_steps), len(m_steps))
+                for step_idx in range(max_steps):
+                    lines.append(f"Step {step_idx}:")
                     lines.append("")
 
-                if step_idx < len(s_steps):
-                    s = s_steps[step_idx]
-                    lines.append(f"- noise_std_dev shape={s.shape}")
-                    lines.append(format_array_preview(s))
-                    lines.append("")
-                else:
-                    lines.append("- noise_std_dev: <missing>")
-                    lines.append("")
+                    if step_idx < len(v_steps):
+                        v = v_steps[step_idx]
+                        lines.append(f"- variance_noise shape={v.shape}")
+                        lines.append(format_array_preview(v))
+                        lines.append("")
+                    else:
+                        lines.append("- variance_noise: <missing>")
+                        lines.append("")
 
-                if step_idx < len(m_steps):
-                    m = m_steps[step_idx]
-                    lines.append(f"- model_output shape={m.shape}")
-                    lines.append(format_array_preview(m))
+                    if step_idx < len(p_steps):
+                        p = p_steps[step_idx]
+                        lines.append(f"- prev_sample_mean shape={p.shape}")
+                        lines.append(format_array_preview(p))
+                        lines.append("")
+                    else:
+                        lines.append("- prev_sample_mean: <missing>")
+                        lines.append("")
+
+                    if step_idx < len(s_steps):
+                        s = s_steps[step_idx]
+                        lines.append(f"- noise_std_dev shape={s.shape}")
+                        lines.append(format_array_preview(s))
+                        lines.append("")
+                    else:
+                        lines.append("- noise_std_dev: <missing>")
+                        lines.append("")
+
+                    if step_idx < len(m_steps):
+                        m = m_steps[step_idx]
+                        lines.append(f"- model_output shape={m.shape}")
+                        lines.append(format_array_preview(m))
+                        lines.append("")
+                    else:
+                        lines.append("- model_output: <missing>")
+                        lines.append("")
                     lines.append("")
-                else:
-                    lines.append("- model_output: <missing>")
-                    lines.append("")
-            lines.append("")
+        lines.append("")
 
     dump_path = out_root / "trajectory_debug_tensors.txt"
     dump_path.write_text("\n".join(lines), encoding="utf-8")
@@ -351,7 +444,23 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compare SDE/CPS trajectory debug (prev_sample_mean, noise_std_dev, variance_noise, model_output) across parallel configs."
     )
-    parser.add_argument("--model", type=str, default="Tongyi-MAI/Z-Image-Turbo", help="Model path.")
+    parser.add_argument(
+        "--models",
+        type=str,
+        nargs="+",
+        default=[
+            "Qwen/Qwen-Image",
+            "Tongyi-MAI/Z-Image-Turbo",
+            "black-forest-labs/FLUX.1-dev",
+        ],
+        help="Model paths to test.",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Single-model override (backward-compatible).",
+    )
     parser.add_argument("--prompt", type=str, default="A cat", help="Prompt.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--size", type=str, default="1024x1024", help="Image size.")
@@ -373,6 +482,14 @@ def main() -> None:
     out_root.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {out_root}")
 
+    model_list = [args.model] if args.model else list(args.models)
+    # De-duplicate while preserving order.
+    seen: set[str] = set()
+    model_list = [m for m in model_list if not (m in seen or seen.add(m))]
+    print("Models:")
+    for m in model_list:
+        print(f"  - {m}")
+
     visible = len(os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")) if os.environ.get("CUDA_VISIBLE_DEVICES") else 1
     if not os.environ.get("CUDA_VISIBLE_DEVICES"):
         try:
@@ -382,73 +499,121 @@ def main() -> None:
             visible = 1
     effective_gpus = visible if args.parallel_gpu_count is None else min(args.parallel_gpu_count, visible)
     configs = default_parallel_configs(effective_gpus)
+    ref_config = ParallelConfig(
+        name="single_gpu_ref",
+        tp_size=1,
+        sp_degree=1,
+        enable_cfg_parallel=False,
+    )
 
-    # (mode -> config_name -> (v_list, p_list, s_list, m_list))
-    data: dict[str, dict[str, tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]]] = {
-        "sde": {},
-        "cps": {},
-    }
+    # (model -> mode -> config_name -> (v_list, p_list, s_list, m_list))
+    data: dict[str, dict[str, dict[str, tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]]]] = {}
+    for model in model_list:
+        data[model] = {"sde": {}, "cps": {}}
     failures: list[str] = []
 
-    for cfg in configs:
-        gen: DiffGenerator | None = None
+    for model in model_list:
+        # 1) Always run single-GPU reference first.
+        gen_ref: DiffGenerator | None = None
         try:
-            gen = create_generator(
-                model=args.model,
-                num_gpus=effective_gpus,
-                tp_size=cfg.tp_size,
-                sp_degree=cfg.sp_degree,
-                enable_cfg_parallel=cfg.enable_cfg_parallel,
+            gen_ref = create_generator(
+                model=model,
+                num_gpus=1,
+                tp_size=1,
+                sp_degree=1,
+                enable_cfg_parallel=False,
                 trust_remote_code=args.trust_remote_code,
                 output_path=out_root,
             )
-            gs = args.guidance_scale
-            if cfg.enable_cfg_parallel and (gs is None or gs <= 1.0):
-                gs = args.cfg_guidance_scale
             for mode in ("sde", "cps"):
                 tri = run_one(
-                    gen,
+                    gen_ref,
                     prompt=args.prompt,
                     seed=args.seed,
                     size=args.size,
                     mode=mode,
                     noise_level=args.noise_level,
                     num_inference_steps=args.num_inference_steps,
-                    guidance_scale=gs,
+                    guidance_scale=args.guidance_scale,
                     cfg_guidance_scale=args.cfg_guidance_scale,
                     log_prob_no_const=args.logprob_no_const,
                     negative_prompt="low quality",
                 )
                 if tri is not None:
-                    data[mode][cfg.name] = tri
+                    data[model][mode][ref_config.name] = tri
                 else:
-                    failures.append(f"{cfg.name}_{mode}: no trajectory debug data")
+                    failures.append(f"{model}:{ref_config.name}_{mode}: no trajectory debug data")
         except Exception as e:
-            failures.append(f"{cfg.name}: {e}")
+            failures.append(f"{model}:{ref_config.name}: {e}")
             traceback.print_exc()
         finally:
-            if gen is not None:
-                gen.shutdown()
+            if gen_ref is not None:
+                gen_ref.shutdown()
 
-    # Build report: for each mode, ref = first config, compare others
-    report: dict[str, list[dict[str, Any]]] = {"sde": [], "cps": []}
-    for mode in ("sde", "cps"):
-        configs_with_data = list(data[mode].keys())
-        if not configs_with_data:
-            continue
-        ref_name = configs_with_data[0]
-        ref_v, ref_p, ref_s, ref_m = data[mode][ref_name]
-        for cname in configs_with_data:
-            cur_v, cur_p, cur_s, cur_m = data[mode][cname]
-            row = {"config": cname}
-            row.update(
-                compare_lists(ref_v, ref_p, ref_s, ref_m, cur_v, cur_p, cur_s, cur_m)
-            )
-            report[mode].append(row)
+        # 2) Run parallel configs and compare against single-GPU reference.
+        for cfg in configs:
+            gen: DiffGenerator | None = None
+            try:
+                gen = create_generator(
+                    model=model,
+                    num_gpus=effective_gpus,
+                    tp_size=cfg.tp_size,
+                    sp_degree=cfg.sp_degree,
+                    enable_cfg_parallel=cfg.enable_cfg_parallel,
+                    trust_remote_code=args.trust_remote_code,
+                    output_path=out_root,
+                )
+                gs = args.guidance_scale
+                if cfg.enable_cfg_parallel and (gs is None or gs <= 1.0):
+                    gs = args.cfg_guidance_scale
+                for mode in ("sde", "cps"):
+                    tri = run_one(
+                        gen,
+                        prompt=args.prompt,
+                        seed=args.seed,
+                        size=args.size,
+                        mode=mode,
+                        noise_level=args.noise_level,
+                        num_inference_steps=args.num_inference_steps,
+                        guidance_scale=gs,
+                        cfg_guidance_scale=args.cfg_guidance_scale,
+                        log_prob_no_const=args.logprob_no_const,
+                        negative_prompt="low quality",
+                    )
+                    if tri is not None:
+                        data[model][mode][cfg.name] = tri
+                    else:
+                        failures.append(f"{model}:{cfg.name}_{mode}: no trajectory debug data")
+            except Exception as e:
+                failures.append(f"{model}:{cfg.name}: {e}")
+                traceback.print_exc()
+            finally:
+                if gen is not None:
+                    gen.shutdown()
+
+    # Build report: for each model/mode, all configs compare to single-GPU ref.
+    report: dict[str, dict[str, list[dict[str, Any]]]] = {
+        m: {"sde": [], "cps": []} for m in model_list
+    }
+    for model in model_list:
+        for mode in ("sde", "cps"):
+            mode_data = data[model][mode]
+            if ref_config.name not in mode_data:
+                failures.append(f"{model}:{mode}: missing single-GPU reference")
+                continue
+            ref_v, ref_p, ref_s, ref_m = mode_data[ref_config.name]
+            for cname in mode_data.keys():
+                cur_v, cur_p, cur_s, cur_m = mode_data[cname]
+                row = {"config": cname, "reference": ref_config.name}
+                row.update(
+                    compare_lists(ref_v, ref_p, ref_s, ref_m, cur_v, cur_p, cur_s, cur_m)
+                )
+                report[model][mode].append(row)
 
     # Print and write report
     print("=== Rollout trajectory debug (prev_sample_mean, noise_std_dev, variance_noise, model_output) ===\n")
     print(f"Effective GPUs: {effective_gpus}")
+    print(f"Reference config for all comparisons: {ref_config.name}")
     if failures:
         print("Failures:")
         for f in failures:
@@ -458,39 +623,54 @@ def main() -> None:
         "# Rollout trajectory debug comparison",
         "",
         f"Effective GPUs: {effective_gpus}",
+        f"Reference config for all comparisons: {ref_config.name}",
         f"Prompt: {args.prompt!r}, seed={args.seed}, noise_level={args.noise_level}",
         "",
     ]
+    lines.append("Models:")
+    for m in model_list:
+        lines.append(f"- {m}")
+    lines.append("")
     if failures:
         lines.append("## Failures")
         for f in failures:
             lines.append(f"- {f}")
         lines.append("")
-    for mode in ("sde", "cps"):
-        if not report[mode]:
-            continue
-        lines.append(f"## Mode: {mode}")
+    for model in model_list:
+        lines.append(f"## Model: {model}")
         lines.append("")
-        lines.append("| config | variance_noise shape | variance_noise max_abs_diff | variance_noise all_match | prev_sample_mean shape | prev_sample_mean max_abs_diff | prev_sample_mean all_match | noise_std_dev shape | noise_std_dev max_abs_diff | noise_std_dev all_match | model_output shape | model_output max_abs_diff | model_output all_match |")
-        lines.append("|--------|----------------------|-----------------------------|--------------------------|------------------------|-------------------------------|---------------------------|---------------------|---------------------------|-------------------------|--------------------|---------------------------|------------------------|")
-        for row in report[mode]:
-            cur_v, cur_p, cur_s, cur_m = data[mode][row["config"]]
-            v_shape = summarize_shapes(cur_v)
-            v_diff = row.get("variance_noise_max_abs_diff", "")
-            v_ok = row.get("variance_noise_all_steps_match", "")
-            p_shape = summarize_shapes(cur_p)
-            p_diff = row.get("prev_sample_mean_max_abs_diff", "")
-            p_ok = row.get("prev_sample_mean_all_steps_match", "")
-            s_shape = summarize_shapes(cur_s)
-            s_diff = row.get("noise_std_dev_max_abs_diff", "")
-            s_ok = row.get("noise_std_dev_all_steps_match", "")
-            m_shape = summarize_shapes(cur_m)
-            m_diff = row.get("model_output_max_abs_diff", "")
-            m_ok = row.get("model_output_all_steps_match", "")
-            lines.append(
-                f"| {row['config']} | {v_shape} | {v_diff} | {v_ok} | {p_shape} | {p_diff} | {p_ok} | {s_shape} | {s_diff} | {s_ok} | {m_shape} | {m_diff} | {m_ok} |"
-            )
-        lines.append("")
+        for mode in ("sde", "cps"):
+            if not report[model][mode]:
+                continue
+            lines.append(f"### Mode: {mode}")
+            lines.append("")
+            for quantity, key, arr_index in (
+                ("variance_noise", "variance_noise", 0),
+                ("prev_sample_mean", "prev_sample_mean", 1),
+                ("noise_std_dev", "noise_std_dev", 2),
+                ("model_output", "model_output", 3),
+            ):
+                lines.append(f"#### {quantity}")
+                lines.append("")
+                lines.append("| config | reference | shape | max_abs_diff | mean_mse | min_cosine | mean_cosine | all_match | max_abs_diff(first_step) | mean_mse(first_step) | min_cosine(first_step) | mean_cosine(first_step) | all_match(first_step) |")
+                lines.append("|--------|-----------|-------|--------------|----------|------------|-------------|-----------|-------------------|------------------|-------------------|--------------------|------------------|")
+                for row in report[model][mode]:
+                    cur_list = data[model][mode][row["config"]][arr_index]
+                    shape = summarize_shapes(cur_list)
+                    max_abs = format_metric(row.get(f"{key}_max_abs_diff", ""))
+                    mean_mse = format_metric(row.get(f"{key}_mean_mse", ""))
+                    min_cos = format_metric(row.get(f"{key}_min_cosine_similarity", ""))
+                    mean_cos = format_metric(row.get(f"{key}_mean_cosine_similarity", ""))
+                    all_match = row.get(f"{key}_all_steps_match", "")
+                    after_max_abs = format_metric(row.get(f"{key}_first_step_max_abs_diff", ""))
+                    after_mean_mse = format_metric(row.get(f"{key}_first_step_mean_mse", ""))
+                    after_min_cos = format_metric(row.get(f"{key}_first_step_min_cosine_similarity", ""))
+                    after_mean_cos = format_metric(row.get(f"{key}_first_step_mean_cosine_similarity", ""))
+                    after_all_match = format_metric(row.get(f"{key}_first_step_all_steps_match", ""))
+                    lines.append(
+                        f"| {row['config']} | {row['reference']} | {shape} | {max_abs} | {mean_mse} | {min_cos} | {mean_cos} | {all_match} | {after_max_abs} | {after_mean_mse} | {after_min_cos} | {after_mean_cos} | {after_all_match} |"
+                    )
+                lines.append("")
     report_path = out_root / "trajectory_debug_report.md"
     report_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"Report written to {report_path}")
@@ -499,6 +679,7 @@ def main() -> None:
         data=data,
         effective_gpus=effective_gpus,
         args=args,
+        models=model_list,
         failures=failures,
     )
     print(f"Tensor dump written to {dump_path}")
