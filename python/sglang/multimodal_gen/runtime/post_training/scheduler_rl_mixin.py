@@ -43,31 +43,25 @@ class SchedulerRLMixin(SchedulerRLDebugMixin):
         self._rollout_enabled = False
         self.release_rollout_resources()
 
-    def prepare_rollout(self, batch: Req) -> None:
+    def prepare_rollout(self, batch: Req, pipeline_config: Any = None) -> None:
         """Enable rollout and set SDE/CPS params. Call once before the denoising loop."""
         self._rollout_enabled = True
         self._rollout_local_log_prob_sum = []
         self._rollout_local_log_prob_count = []
         self._reset_rollout_debug_tensors()
-        log_prob_no_const = batch.rollout_log_prob_no_const
-        pipeline_config = getattr(batch, "_rollout_pipeline_config", None)
         if get_sp_world_size() > 1 and pipeline_config is None:
             raise RuntimeError(
-                "SP rollout requires batch._rollout_pipeline_config to be set before prepare_rollout()."
+                "SP rollout requires pipeline_config to be passed to prepare_rollout()."
             )
-        # Prepare params needed for rollout
-        self._rollout_param_log_prob_no_const = log_prob_no_const
+        self._rollout_param_log_prob_no_const = batch.rollout_log_prob_no_const
         self._rollout_param_noise_level = float(batch.rollout_noise_level)
         self._rollout_param_sde_type = batch.rollout_sde_type
         self._rollout_param_debug_mode = bool(getattr(batch, "rollout_debug_mode", False))
         self._rollout_latents_shape = tuple(batch.latents.shape) if batch.latents is not None else None
-        # Use rollout_ctx to store any external context needed for rollout
         self._rollout_ctx = {
             "pipeline_config": pipeline_config,
-            "batch": batch
+            "batch": batch,
         }
-
-        # Prepare extra parameters for sampling
         self._rollout_sigma_max = self.sigmas[min(1, len(self.sigmas) - 1)].item()
     
     def already_prepared_rollout(self):
