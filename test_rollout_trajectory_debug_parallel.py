@@ -176,10 +176,15 @@ def run_one(
     if result is None:
         return None
     rollout_trajectory_data = getattr(result, "rollout_trajectory_data", None)
-    v = getattr(rollout_trajectory_data, "rollout_variance_noises", None)
-    p = getattr(rollout_trajectory_data, "rollout_prev_sample_means", None)
-    s = getattr(rollout_trajectory_data, "rollout_noise_std_devs", None)
-    m = getattr(rollout_trajectory_data, "rollout_model_outputs", None)
+    debug_tensors = (
+        getattr(rollout_trajectory_data, "rollout_debug_tensors", None)
+        if rollout_trajectory_data is not None
+        else None
+    )
+    v = getattr(debug_tensors, "rollout_variance_noises", None)
+    p = getattr(debug_tensors, "rollout_prev_sample_means", None)
+    s = getattr(debug_tensors, "rollout_noise_std_devs", None)
+    m = getattr(debug_tensors, "rollout_model_outputs", None)
     v_steps = to_step_list(v)
     p_steps = to_step_list(p)
     s_steps = to_step_list(s)
