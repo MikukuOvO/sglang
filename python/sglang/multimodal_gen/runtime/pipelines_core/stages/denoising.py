@@ -144,10 +144,10 @@ class DenoisingStage(PipelineStage):
 
         self.scheduler.reset_rollout_states()
         if batch.rollout:
-            # Attach pipeline config to batch so scheduler can prepare rollout context
-            # from a single input object.
-            batch._rollout_pipeline_config = self.server_args.pipeline_config
-            self.scheduler.prepare_rollout(batch=batch)
+            self.scheduler.prepare_rollout(
+                batch=batch,
+                pipeline_config=self.server_args.pipeline_config,
+            )
 
     def _maybe_collect_rollout_log_probs(self, batch: Req):
         """Get rollout log probs and store into batch for reward calculation."""
