@@ -8,6 +8,9 @@ from sglang.multimodal_gen.runtime.distributed import (
     get_sp_world_size,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
+from sglang.multimodal_gen.runtime.post_training.rl_dataclasses import (
+    RolloutDebugTensors,
+)
 
 
 class SchedulerRLDebugMixin:
@@ -45,15 +48,11 @@ class SchedulerRLDebugMixin:
 
     def collect_rollout_debug_tensors(
         self, batch: Req
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> RolloutDebugTensors:
         """
         Consume rollout debug tensors and merge for all SP ranks.
 
-        Returns four tensors with shape [B, T, ...]:
-        - variance_noises
-        - prev_sample_means
-        - noise_std_devs
-        - model_outputs
+        Returns rollout debug tensors with shape [B, T, ...].
         """
         self._require_rollout_enabled()
         variance_noises, prev_sample_means, noise_std_devs, model_outputs = (
@@ -102,9 +101,9 @@ class SchedulerRLDebugMixin:
             )
             # noise_std_devs is same on every device, not a sharded latent tensor.
 
-        return (
-            variance_noises.cpu(),
-            prev_sample_means.cpu(),
-            noise_std_devs.cpu(),
-            model_outputs.cpu(),
+        return RolloutDebugTensors(
+            rollout_variance_noises=variance_noises.cpu(),
+            rollout_prev_sample_means=prev_sample_means.cpu(),
+            rollout_noise_std_devs=noise_std_devs.cpu(),
+            rollout_model_outputs=model_outputs.cpu(),
         )
