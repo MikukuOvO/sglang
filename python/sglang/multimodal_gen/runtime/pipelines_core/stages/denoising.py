@@ -6,7 +6,6 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
-import json
 import math
 import os
 import time
@@ -1130,19 +1129,6 @@ class DenoisingStage(PipelineStage):
                             guidance=guidance,
                             latents=latents,
                         )
-                        self._maybe_dump_rollout_step0_debug(
-                            batch=batch,
-                            timestep_index=i,
-                            timestep_value=t_int,
-                            latent_model_input=latent_model_input,
-                            timestep=timestep,
-                            prompt_embeds=server_args.pipeline_config.get_pos_prompt_embeds(
-                                batch
-                            ),
-                            pos_cond_kwargs=pos_cond_kwargs,
-                            noise_pred=noise_pred,
-                        )
-
                         # Save noise_pred to batch for external access (e.g., ComfyUI)
                         if server_args.comfyui_mode:
                             batch.noise_pred = noise_pred
@@ -1573,94 +1559,6 @@ class DenoisingStage(PipelineStage):
                     guidance_rescale=batch.guidance_rescale,
                 )
             return noise_pred
-
-    def _debug_value_summary(self, value: Any) -> Any:
-        """Best-effort compact summary for rollout step-0 debug."""
-        if isinstance(value, torch.Tensor):
-            with torch.no_grad():
-                x = value.detach()
-                x_f = x.float()
-                return {
-                    "type": "tensor",
-                    "shape": list(x.shape),
-                    "dtype": str(x.dtype),
-                    "device": str(x.device),
-                    "mean": float(x_f.mean().item()),
-                    "std": float(x_f.std(unbiased=False).item()),
-                    "min": float(x_f.min().item()),
-                    "max": float(x_f.max().item()),
-                    "abs_max": float(x_f.abs().max().item()),
-                }
-        if isinstance(value, (list, tuple)):
-            return [self._debug_value_summary(v) for v in value]
-        if isinstance(value, dict):
-            return {k: self._debug_value_summary(v) for k, v in value.items()}
-        if value is None:
-            return None
-        return {"type": type(value).__name__, "repr": repr(value)[:200]}
-
-    def _maybe_dump_rollout_step0_debug(
-        self,
-        *,
-        batch: Req,
-        timestep_index: int,
-        timestep_value: int,
-        latent_model_input: torch.Tensor,
-        timestep: torch.Tensor,
-        prompt_embeds: Any,
-        pos_cond_kwargs: dict[str, Any],
-        noise_pred: torch.Tensor,
-    ) -> None:
-        dump_dir = os.environ.get("SGLANG_ROLLOUT_STEP0_DEBUG_DIR", "")
-        if (
-            not dump_dir
-            or not batch.rollout
-            or timestep_index != 0
-            or not isinstance(noise_pred, torch.Tensor)
-        ):
-            return
-        try:
-            os.makedirs(dump_dir, exist_ok=True)
-            world_group = get_world_group()
-            world_rank = getattr(world_group, "rank", 0)
-            tp_group = get_tp_group()
-            record = {
-                "request_id": getattr(batch, "request_id", None),
-                "rollout_sde_type": getattr(batch, "rollout_sde_type", None),
-                "seed": getattr(batch, "seed", None),
-                "prompt": getattr(batch, "prompt", None),
-                "timestep_index": int(timestep_index),
-                "timestep_value": int(timestep_value),
-                "parallel": {
-                    "world_size": int(get_world_size()),
-                    "world_rank": int(world_rank),
-                    "tp_size": int(tp_group.world_size) if tp_group else 1,
-                    "tp_rank": int(get_tp_rank()),
-                    "sp_size": int(get_sp_world_size()),
-                    "sp_rank": int(get_sp_parallel_rank()),
-                    "cfg_parallel_enabled": bool(self.server_args.enable_cfg_parallel),
-                    "cfg_rank": int(get_classifier_free_guidance_rank()),
-                },
-                "server_args": {
-                    "model_path": getattr(self.server_args, "model_path", None),
-                    "tp_size": int(self.server_args.tp_size),
-                    "sp_degree": int(self.server_args.sp_degree),
-                    "enable_cfg_parallel": bool(self.server_args.enable_cfg_parallel),
-                    "disable_autocast": bool(self.server_args.disable_autocast),
-                },
-                "stats": {
-                    "latent_model_input": self._debug_value_summary(latent_model_input),
-                    "timestep": self._debug_value_summary(timestep),
-                    "prompt_embeds": self._debug_value_summary(prompt_embeds),
-                    "pos_cond_kwargs": self._debug_value_summary(pos_cond_kwargs),
-                    "noise_pred": self._debug_value_summary(noise_pred),
-                },
-            }
-            out_path = os.path.join(dump_dir, f"step0_debug_pid{os.getpid()}.jsonl")
-            with open(out_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=True) + "\n")
-        except Exception as e:
-            logger.warning("Failed to write rollout step-0 debug dump: %s", e)
 
     def prepare_sta_param(self, batch: Req, server_args: ServerArgs):
         """
