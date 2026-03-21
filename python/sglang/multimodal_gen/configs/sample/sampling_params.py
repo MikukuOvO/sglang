@@ -162,6 +162,8 @@ class SamplingParams:
     rollout: bool = False
     rollout_sde_type: str = "sde"
     rollout_noise_level: float = 0.7
+    rollout_log_prob_no_const: bool = False  # exclude constants in rollout logprob
+    rollout_debug_mode: bool = False  # return rollout debug tensors (intermediate states)
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
     # if True, disallow user params to override subclass-defined protected fields
@@ -312,6 +314,13 @@ class SamplingParams:
         _finite_non_negative_float(
             "rollout_noise_level", self.rollout_noise_level, allow_none=False
         )
+
+        _VALID_ROLLOUT_SDE_TYPES = ("sde", "cps", "ode")
+        if self.rollout_sde_type not in _VALID_ROLLOUT_SDE_TYPES:
+            raise ValueError(
+                f"rollout_sde_type must be one of {_VALID_ROLLOUT_SDE_TYPES}, "
+                f"got {self.rollout_sde_type!r}"
+            )
 
         if self.cfg_normalization is None:
             self.cfg_normalization = 0.0
@@ -823,7 +832,7 @@ class SamplingParams:
         parser.add_argument(
             "--rollout-sde-type",
             type=str,
-            choices=["sde", "cps"],
+            choices=["sde", "cps", "ode"],
             default=SamplingParams.rollout_sde_type,
             help="Rollout step objective type used in log-prob computation.",
         )
@@ -832,6 +841,18 @@ class SamplingParams:
             type=float,
             default=SamplingParams.rollout_noise_level,
             help="Noise level used by rollout SDE/CPS step objective.",
+        )
+        parser.add_argument(
+            "--rollout-log-prob-no-const",
+            action=StoreBoolean,
+            default=SamplingParams.rollout_log_prob_no_const,
+            help="If true, return rollout log-prob without constant terms.",
+        )
+        parser.add_argument(
+            "--rollout-debug-mode",
+            action=StoreBoolean,
+            default=SamplingParams.rollout_debug_mode,
+            help="If true, return rollout debug tensors (variance noise, mean, std, model output).",
         )
         parser.add_argument(
             "--return-trajectory-decoded",
