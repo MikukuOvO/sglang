@@ -132,7 +132,14 @@ class SchedulerRLMixin(SchedulerRLDebugMixin):
         next_sigma: torch.FloatTensor,
         generator: torch.Generator,
     ) -> tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
-        """flow sde sampling methods, reference: FlowGRPO"""
+        """Flow rollout step for log-prob / sampling (see FlowGRPO-style references).
+
+        ``rollout_sde_type`` (from batch, set in ``prepare_rollout``):
+
+        1. ``"sde"``: Standard stochastic differential equation transition (Gaussian).
+        2. ``"cps"``: Coupled Particle Sampling.
+        3. ``"ode"``: Deterministic ODE step (no diffusion noise).
+        """
         dt = next_sigma - current_sigma
         if self._rollout_param_sde_type == "sde":
             variance_noise = self._rollout_variance_noise(model_output, generator)
