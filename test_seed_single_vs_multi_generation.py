@@ -13,10 +13,6 @@ This script verifies that:
 
 produce **pairwise identical** RGB uint8 outputs (same prompt and other hyperparameters).
 
-**Note:** Native SGLang pipelines for some models (e.g. Z-Image, standard Qwen-Image) do
-not fully support ``num_outputs_per_prompt > 1``. Use a model/backend that supports multi
-output (e.g. diffusers fallback) or set ``--num-outputs 1`` to skip the multi call.
-
 It does not replace parallel / rollout-ODE comparison tests; it only pins the
 single-vs-multi batching contract.
 """
