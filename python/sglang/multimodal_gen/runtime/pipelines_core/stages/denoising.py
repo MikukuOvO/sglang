@@ -591,7 +591,7 @@ class DenoisingStage(PipelineStage):
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
-            {"generator": batch.generator, "eta": batch.eta, "rollout": batch.rollout},
+            {"generator": batch.generator, "eta": batch.eta},
         )
 
         # Setup precision and autocast settings
