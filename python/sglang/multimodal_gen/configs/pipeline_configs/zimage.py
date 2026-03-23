@@ -116,6 +116,16 @@ class ZImagePipelineConfig(ImagePipelineConfig):
         H_tok_local = H_tok_pad // sp_size
         h0_tok = rank * H_tok_local
 
+        # Cap/text sharding: avoid duplicating cap tokens across ranks.
+        cap_len = (
+            int(batch.prompt_embeds[0].size(0))
+            if getattr(batch, "prompt_embeds", None)
+            else 0
+        )
+        cap_total = self._ceil_to_multiple(cap_len, self.SEQ_LEN_MULTIPLE * sp_size)
+        cap_local = cap_total // sp_size
+        cap_start = rank * cap_local
+
         plan = {
             "sp_size": sp_size,
             "rank": rank,
@@ -129,6 +139,9 @@ class ZImagePipelineConfig(ImagePipelineConfig):
             "H_tok_pad": H_tok_pad,
             "H_tok_local": H_tok_local,
             "h0_tok": h0_tok,
+            "cap_total": cap_total,
+            "cap_local": cap_local,
+            "cap_start": cap_start,
         }
         batch._zimage_sp_plan = plan
         return plan
