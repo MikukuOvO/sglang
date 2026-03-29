@@ -1,0 +1,136 @@
+{
+  "output_root": "/root/miles/sglang/tmp/sd3_num_outputs_bench_20260326_full",
+  "model_path": "stabilityai/stable-diffusion-3-medium-diffusers",
+  "prompt": "A red ceramic mug on a wooden table, soft natural light, high detail",
+  "steps": 20,
+  "guidance_scale": 7.0,
+  "seed": 123,
+  "gpu": "4",
+  "repeats": 3,
+  "resolutions": [
+    512,
+    1024
+  ],
+  "num_outputs": [
+    1,
+    2,
+    4,
+    8,
+    12,
+    16
+  ],
+  "summary_rows": [
+    {
+      "resolution": "512x512",
+      "num_outputs_per_prompt": 1,
+      "median_total_duration_ms": 3770.4442590475082,
+      "median_peak_reserved_mb": 6828.0,
+      "median_time_per_image_ms": 3770.4442590475082,
+      "speedup_vs_n1": 1.0,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "512x512",
+      "num_outputs_per_prompt": 2,
+      "median_total_duration_ms": 3668.512305011973,
+      "median_peak_reserved_mb": 8744.0,
+      "median_time_per_image_ms": 1834.2561525059864,
+      "speedup_vs_n1": 2.0555712755256534,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "512x512",
+      "num_outputs_per_prompt": 4,
+      "median_total_duration_ms": 4333.808158058673,
+      "median_peak_reserved_mb": 12972.0,
+      "median_time_per_image_ms": 1083.4520395146683,
+      "speedup_vs_n1": 3.480028761343674,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "512x512",
+      "num_outputs_per_prompt": 8,
+      "median_total_duration_ms": 5566.5885070338845,
+      "median_peak_reserved_mb": 21324.0,
+      "median_time_per_image_ms": 695.8235633792356,
+      "speedup_vs_n1": 5.418678609756354,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "512x512",
+      "num_outputs_per_prompt": 12,
+      "median_total_duration_ms": 6929.449266055599,
+      "median_peak_reserved_mb": 29666.0,
+      "median_time_per_image_ms": 577.4541055046333,
+      "speedup_vs_n1": 6.529426707863722,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "512x512",
+      "num_outputs_per_prompt": 16,
+      "median_total_duration_ms": 8323.92914686352,
+      "median_peak_reserved_mb": 38020.0,
+      "median_time_per_image_ms": 520.24557167897,
+      "speedup_vs_n1": 7.247431721291328,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "1024x1024",
+      "num_outputs_per_prompt": 1,
+      "median_total_duration_ms": 4460.343464976177,
+      "median_peak_reserved_mb": 13344.0,
+      "median_time_per_image_ms": 4460.343464976177,
+      "speedup_vs_n1": 1.0,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "1024x1024",
+      "num_outputs_per_prompt": 2,
+      "median_total_duration_ms": 5890.587996924296,
+      "median_peak_reserved_mb": 21208.0,
+      "median_time_per_image_ms": 2945.293998462148,
+      "speedup_vs_n1": 1.514396684101857,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "1024x1024",
+      "num_outputs_per_prompt": 4,
+      "median_total_duration_ms": 8699.429154163226,
+      "median_peak_reserved_mb": 37840.0,
+      "median_time_per_image_ms": 2174.8572885408066,
+      "speedup_vs_n1": 2.050867194126925,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "1024x1024",
+      "num_outputs_per_prompt": 8,
+      "median_total_duration_ms": 14270.711018005386,
+      "median_peak_reserved_mb": 70976.0,
+      "median_time_per_image_ms": 1783.8388772506732,
+      "speedup_vs_n1": 2.5004183516005907,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "1024x1024",
+      "num_outputs_per_prompt": 12,
+      "median_total_duration_ms": 20020.55392996408,
+      "median_peak_reserved_mb": 97998.0,
+      "median_time_per_image_ms": 1668.3794941636734,
+      "speedup_vs_n1": 2.6734585749701156,
+      "successful_runs": 3
+    },
+    {
+      "resolution": "1024x1024",
+      "num_outputs_per_prompt": 16,
+      "median_total_duration_ms": 25499.44964493625,
+      "median_peak_reserved_mb": 129088.0,
+      "median_time_per_image_ms": 1593.7156028085155,
+      "speedup_vs_n1": 2.798707283229181,
+      "successful_runs": 3
+    }
+  ],
+  "successful_logical_runs": 36,
+  "successful_attempts": 36,
+  "total_attempts": 36,
+  "failed_attempts": 0
+}

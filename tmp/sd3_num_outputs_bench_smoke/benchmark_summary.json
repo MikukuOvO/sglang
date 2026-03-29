@@ -1,0 +1,31 @@
+{
+  "output_root": "/root/miles/sglang/tmp/sd3_num_outputs_bench_smoke",
+  "model_path": "stabilityai/stable-diffusion-3-medium-diffusers",
+  "prompt": "A red ceramic mug on a wooden table, soft natural light, high detail",
+  "steps": 20,
+  "guidance_scale": 7.0,
+  "seed": 123,
+  "gpu": "4",
+  "repeats": 1,
+  "resolutions": [
+    512
+  ],
+  "num_outputs": [
+    1
+  ],
+  "summary_rows": [
+    {
+      "resolution": "512x512",
+      "num_outputs_per_prompt": 1,
+      "median_total_duration_ms": 3489.152770023793,
+      "median_peak_reserved_mb": 6828.0,
+      "median_time_per_image_ms": 3489.152770023793,
+      "speedup_vs_n1": 1.0,
+      "successful_runs": 1
+    }
+  ],
+  "successful_logical_runs": 1,
+  "successful_attempts": 1,
+  "total_attempts": 1,
+  "failed_attempts": 0
+}
