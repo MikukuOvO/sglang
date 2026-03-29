@@ -2,6 +2,7 @@
 
 # SPDX-License-Identifier: Apache-2.0
 import gc
+import logging
 import multiprocessing as mp
 import os
 import time
@@ -28,10 +29,11 @@ from sglang.multimodal_gen.runtime.distributed.parallel_state import (
     get_ulysses_parallel_rank,
     get_ulysses_parallel_world_size,
 )
-from sglang.multimodal_gen.runtime.entrypoints.utils import save_outputs
 from sglang.multimodal_gen.runtime.entrypoints.post_training.io_struct import (
+    UpdateWeightFromTensorCheckerReqInput,
     UpdateWeightFromTensorReqInput,
 )
+from sglang.multimodal_gen.runtime.entrypoints.utils import save_outputs
 from sglang.multimodal_gen.runtime.loader.weight_utils import compute_weights_checksum
 from sglang.multimodal_gen.runtime.loader.weights_updater import (
     WeightsUpdater,
@@ -60,7 +62,11 @@ from sglang.multimodal_gen.runtime.utils.perf_logger import (
     PerformanceLogger,
     capture_memory_snapshot,
 )
+from sglang.multimodal_gen.runtime.utils.update_weight_from_tensor_checker import (
+    UpdateWeightFromTensorChecker,
+)
 from sglang.srt.utils import MultiprocessingSerializer
+from sglang.srt.utils.network import NetworkAddress
 
 logger = init_logger(__name__)
 
@@ -110,7 +116,9 @@ class GPUWorker:
             ring_degree=self.server_args.ring_degree,
             sp_size=self.server_args.sp_degree,
             dp_size=self.server_args.dp_size,
-            distributed_init_method=f"tcp://127.0.0.1:{self.master_port}",
+            distributed_init_method=NetworkAddress(
+                "127.0.0.1", self.master_port
+            ).to_tcp(),
             dist_timeout=self.server_args.dist_timeout,
         )
 
@@ -199,7 +207,7 @@ class GPUWorker:
 
         pool_overhead_gb = peak_reserved_gb - peak_allocated_gb
 
-        logger.info(
+        logger.debug(
             f"Peak GPU memory: {peak_reserved_gb:.2f} GB, "
             f"Peak allocated: {peak_allocated_gb:.2f} GB, "
             f"Memory pool overhead: {pool_overhead_gb:.2f} GB ({pool_overhead_gb / peak_reserved_gb * 100:.1f}%), "
@@ -250,7 +258,11 @@ class GPUWorker:
                     "after_forward", peak_snapshot
                 )
 
-            if self.rank == 0 and not req.suppress_logs:
+            if (
+                self.rank == 0
+                and not req.suppress_logs
+                and logger.isEnabledFor(logging.DEBUG)
+            ):
                 self.do_mem_analysis(output_batch)
 
             duration_ms = (time.monotonic() - start_time) * 1000
@@ -429,21 +441,15 @@ class GPUWorker:
         if not self.pipeline:
             return False, "Pipeline is not initialized"
 
-        payloads = req.serialized_named_tensors
-        if not payloads:
-            return False, "serialized_named_tensors is required"
+        payloads, error = self._select_rank_scoped_payload(
+            payloads=req.serialized_named_tensors,
+            field_name="serialized_named_tensors",
+        )
+        if error is not None:
+            return False, error
 
-        tp_world_size = get_tp_world_size()
-        if len(payloads) not in (1, tp_world_size):
-            return (
-                False,
-                "serialized_named_tensors size must be 1 or tp_size "
-                f"({tp_world_size}), got {len(payloads)}",
-            )
-
-        payload_idx = get_tp_rank() if len(payloads) == tp_world_size else 0
         try:
-            named_tensors = MultiprocessingSerializer.deserialize(payloads[payload_idx])
+            named_tensors = MultiprocessingSerializer.deserialize(payloads)
         except Exception as e:
             return False, f"Failed to deserialize serialized_named_tensors: {e}"
 
@@ -453,6 +459,29 @@ class GPUWorker:
             named_tensors=named_tensors,
             load_format=req.load_format,
             target_modules=req.target_modules,
+        )
+
+    def update_weight_from_tensor_checker(
+        self,
+        req: UpdateWeightFromTensorCheckerReqInput,
+    ) -> tuple[bool, str]:
+        """Verify the live transformer weights against expected SHA-256 values."""
+        if not self.pipeline:
+            return False, "Pipeline is not initialized"
+
+        expected_transformer_sha256, error = self._select_rank_scoped_payload(
+            payloads=req.expected_transformer_sha256,
+            field_name="expected_transformer_sha256",
+        )
+        if error is not None:
+            return False, error
+
+        checker = UpdateWeightFromTensorChecker(self.pipeline)
+        return checker.verify_across_tp(
+            expected_transformer_sha256,
+            tp_rank=get_tp_rank(),
+            tp_world_size=get_tp_world_size(),
+            tp_cpu_group=self.tp_cpu_group,
         )
 
     def get_weights_checksum(
@@ -475,6 +504,27 @@ class GPUWorker:
                 iter_materialized_weights(module)
             )
         return checksums
+
+    def _select_rank_scoped_payload(
+        self,
+        payloads: list,
+        field_name: str,
+    ) -> tuple[object | None, str | None]:
+        if not isinstance(payloads, list):
+            return None, f"{field_name} must be a list"
+        if not payloads:
+            return None, f"{field_name} is required"
+
+        tp_world_size = get_tp_world_size()
+        if len(payloads) not in (1, tp_world_size):
+            return (
+                None,
+                f"{field_name} size must be 1 or tp_size ({tp_world_size}), "
+                f"got {len(payloads)}",
+            )
+
+        payload_idx = get_tp_rank() if len(payloads) == tp_world_size else 0
+        return payloads[payload_idx], None
 
 
 OOM_MSG = f"""
